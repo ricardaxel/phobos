@@ -28450,6 +28450,7 @@ assert(tz.dstName == "PDT");
 
                     if(!tzName.extension().empty ||
                        !tzName.startsWith(subName) ||
+                       tzName == "leapseconds" ||
                        tzName == "+VERSION")
                     {
                         continue;
