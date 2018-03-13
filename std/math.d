@@ -7174,16 +7174,16 @@ int feqrel(X)(const X x, const X y) @trusted pure nothrow @nogc
     alias F = floatTraits!(X);
     static if (F.realFormat == RealFormat.ibmExtended)
     {
-        if (cast(double*)(&x)[MANTISSA_MSB] == cast(double*)(&y)[MANTISSA_MSB])
+        if ((cast(double*)&x)[MANTISSA_MSB] == (cast(double*)&y)[MANTISSA_MSB])
         {
             return double.mant_dig
-            + feqrel(cast(double*)(&x)[MANTISSA_LSB],
-                    cast(double*)(&y)[MANTISSA_LSB]);
+            + feqrel((cast(double*)&x)[MANTISSA_LSB],
+                    (cast(double*)&y)[MANTISSA_LSB]);
         }
         else
         {
-            return feqrel(cast(double*)(&x)[MANTISSA_MSB],
-                    cast(double*)(&y)[MANTISSA_MSB]);
+            return feqrel((cast(double*)&x)[MANTISSA_MSB],
+                    (cast(double*)&y)[MANTISSA_MSB]);
         }
     }
     else
