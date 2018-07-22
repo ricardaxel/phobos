@@ -14,6 +14,8 @@ See_Also: $(LINK2 https://docs.microsoft.com/en-us/sql/odbc/reference/syntax/odb
 
 module etc.c.odbc.sqlext;
 
+version (WebAssembly) {} else:
+
 import etc.c.odbc.sql;
 import etc.c.odbc.sqltypes;
 

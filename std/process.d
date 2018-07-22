@@ -84,6 +84,8 @@ Macros:
 */
 module std.process;
 
+version (WebAssembly) {} else:
+
 version (Posix)
 {
     import core.sys.posix.sys.wait;

@@ -49,6 +49,7 @@ immutable
     else version(NetBSD)  OS os = OS.netBSD;
     else version(DragonFlyBSD) OS os = OS.dragonFlyBSD;
     else version(Posix)   OS os = OS.otherPosix;
+    else version(WebAssembly) {}
     else static assert(0, "Unknown OS.");
 
     /++

@@ -78,6 +78,8 @@ Source:    $(PHOBOSSRC std/file.d)
  */
 module std.file;
 
+version (WebAssembly) {} else:
+
 import core.stdc.errno, core.stdc.stdlib, core.stdc.string;
 import core.time : abs, dur, hnsecs, seconds;
 

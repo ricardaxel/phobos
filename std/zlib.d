@@ -55,6 +55,8 @@
  */
 module std.zlib;
 
+version (WebAssembly) {} else:
+
 //debug=zlib;       // uncomment to turn on debugging printf's
 
 import etc.c.zlib;

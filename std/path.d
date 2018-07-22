@@ -95,6 +95,7 @@ $(TR $(TD Other) $(TD
 */
 module std.path;
 
+version (WebAssembly) {} else:
 
 // FIXME
 import std.file; //: getcwd;

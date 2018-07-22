@@ -71,6 +71,8 @@ void main()
  */
 module std.zip;
 
+version (WebAssembly) {} else:
+
 //debug=print;
 
 /** Thrown on error.

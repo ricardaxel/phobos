@@ -13,6 +13,8 @@ See_Also: $(LINK2 https://docs.microsoft.com/en-us/sql/odbc/reference/syntax/odb
 */
 module etc.c.odbc.sqltypes;
 
+version (WebAssembly) {} else:
+
 extern (Windows):
 
 // * API declaration data types *

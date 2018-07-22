@@ -13,6 +13,8 @@ Authors:   $(HTTP digitalmars.com, Walter Bright),
  */
 module std.stdio;
 
+version (WebAssembly) {} else:
+
 import core.stdc.stddef; // wchar_t
 public import core.stdc.stdio;
 import std.algorithm.mutation; // copy

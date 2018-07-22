@@ -32,6 +32,8 @@ module etc.c.sqlite3;
 ** part of the build process.
 */
 
+version (WebAssembly) {} else:
+
 import core.stdc.stdarg : va_list;
 
 extern (C) __gshared nothrow:

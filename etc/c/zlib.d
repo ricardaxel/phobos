@@ -5,6 +5,8 @@
 
 module etc.c.zlib;
 
+version (WebAssembly) {} else:
+
 import core.stdc.config;
 
 /* zlib.h -- interface of the 'zlib' general purpose compression library

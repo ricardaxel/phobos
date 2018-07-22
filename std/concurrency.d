@@ -31,6 +31,8 @@
  */
 module std.concurrency;
 
+version (WebAssembly) {} else:
+
 public import std.variant;
 
 import core.atomic;

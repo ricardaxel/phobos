@@ -194,6 +194,11 @@ else version (X86)
     private alias haveSSE = core.cpuid.sse;
 }
 
+version(X86_Any)       version = IeeeFlagsSupport;
+else version(PPC_Any)  version = IeeeFlagsSupport;
+else version(MIPS_Any) version = IeeeFlagsSupport;
+else version(ARM_Any)  version = IeeeFlagsSupport;
+
 version(unittest) private
 {
     static if (real.sizeof > double.sizeof)
@@ -2737,10 +2742,13 @@ private real exp2Impl(real x) @nogc @trusted pure nothrow
 
 @system unittest
 {
-    FloatingPointControl ctrl;
-    if (FloatingPointControl.hasExceptionTraps)
-        ctrl.disableExceptions(FloatingPointControl.allExceptions);
-    ctrl.rounding = FloatingPointControl.roundToNearest;
+    version (D_HardFloat)
+    {
+        FloatingPointControl ctrl;
+        if (FloatingPointControl.hasExceptionTraps)
+            ctrl.disableExceptions(FloatingPointControl.allExceptions);
+        ctrl.rounding = FloatingPointControl.roundToNearest;
+    }
 
     alias F = floatTraits!real;
 
@@ -2805,10 +2813,10 @@ private real exp2Impl(real x) @nogc @trusted pure nothrow
 
     const minEqualMantissaBits = real.mant_dig - 2;
     real x;
-    IeeeFlags f;
+    version (IeeeFlagsSupport) IeeeFlags f;
     foreach (ref pair; exptestpoints)
     {
-        resetIeeeFlags();
+        version (IeeeFlagsSupport) resetIeeeFlags();
         x = exp(pair[0]);
         assert(feqrel(x, pair[1]) >= minEqualMantissaBits);
     }
@@ -2819,17 +2827,17 @@ private real exp2Impl(real x) @nogc @trusted pure nothrow
     assert(exp(0.0L) == 1.0);
 
     // NaN propagation. Doesn't set flags, bcos was already NaN.
-    resetIeeeFlags();
+    version (IeeeFlagsSupport) resetIeeeFlags();
     x = exp(real.nan);
-    f = ieeeFlags;
+    version (IeeeFlagsSupport) f = ieeeFlags;
     assert(isIdentical(abs(x), real.nan));
-    assert(f.flags == 0);
+    version (IeeeFlagsSupport) assert(f.flags == 0);
 
-    resetIeeeFlags();
+    version (IeeeFlagsSupport) resetIeeeFlags();
     x = exp(-real.nan);
-    f = ieeeFlags;
+    version (IeeeFlagsSupport) f = ieeeFlags;
     assert(isIdentical(abs(x), real.nan));
-    assert(f.flags == 0);
+    version (IeeeFlagsSupport) assert(f.flags == 0);
 
     x = exp(NaN(0x123));
     assert(isIdentical(x, NaN(0x123)));
@@ -3387,9 +3395,18 @@ if (isIntegral!T && isSigned!T)
 /**
 Special return values of $(LREF ilogb).
  */
-alias FP_ILOGB0   = core.stdc.math.FP_ILOGB0;
-/// ditto
-alias FP_ILOGBNAN = core.stdc.math.FP_ILOGBNAN;
+version (WebAssembly)
+{
+    enum FP_ILOGB0   = int.min;
+    /// ditto
+    enum FP_ILOGBNAN = int.min;
+}
+else
+{
+    alias FP_ILOGB0   = core.stdc.math.FP_ILOGB0;
+    /// ditto
+    alias FP_ILOGBNAN = core.stdc.math.FP_ILOGBNAN;
+}
 
 ///
 @safe pure unittest
@@ -4870,13 +4887,13 @@ float rint(float x) @safe pure nothrow @nogc { return rint(cast(real) x); }
 ///
 @safe unittest
 {
-    resetIeeeFlags();
+    version (IeeeFlagsSupport) resetIeeeFlags();
     assert(rint(0.4) == 0);
     version(LDC)
     {
         // inexact bit not set with enabled optimizations
     }
-    else
+    else version (IeeeFlagsSupport)
         assert(ieeeFlags.inexact);
 
     assert(rint(0.5) == 0);
@@ -5319,6 +5336,9 @@ real remquo(real x, real y, out int n) @trusted nothrow @nogc  /// ditto
     }
 }
 
+version (IeeeFlagsSupport)
+{
+
 /** IEEE exception status flags ('sticky bits')
 
  These flags indicate that an exceptional floating-point condition has occurred.
@@ -5661,23 +5681,6 @@ version(D_HardFloat) unittest
     }}
 }
 
-version(X86_Any)
-{
-    version = IeeeFlagsSupport;
-}
-else version(PPC_Any)
-{
-    version = IeeeFlagsSupport;
-}
-else version(MIPS_Any)
-{
-    version = IeeeFlagsSupport;
-}
-else version(ARM_Any)
-{
-    version = IeeeFlagsSupport;
-}
-
 /// Set all of the floating-point status flags to false.
 void resetIeeeFlags() @trusted nothrow @nogc
 {
@@ -5719,6 +5722,11 @@ void resetIeeeFlags() @trusted nothrow @nogc
     assert(isNaN(a));
     assert(ieeeFlags.invalid);
 }
+
+} // IeeeFlagsSupport
+
+version (D_HardFloat)
+{
 
 /** Control the Floating point hardware
 
@@ -6300,15 +6308,12 @@ private:
     }
     ensureDefaults();
 
-    version(D_HardFloat)
     {
-        {
-            FloatingPointControl ctrl;
-            ctrl.rounding = FloatingPointControl.roundDown;
-            assert(FloatingPointControl.rounding == FloatingPointControl.roundDown);
-        }
-        ensureDefaults();
+        FloatingPointControl ctrl;
+        ctrl.rounding = FloatingPointControl.roundDown;
+        assert(FloatingPointControl.rounding == FloatingPointControl.roundDown);
     }
+    ensureDefaults();
 
     if (FloatingPointControl.hasExceptionTraps)
     {
@@ -6332,7 +6337,7 @@ version(LDC)
     // Win64: debug and release fail
 }
 else
-version(D_HardFloat) @safe unittest // rounding
+@safe unittest // rounding
 {
     import std.meta : AliasSeq;
 
@@ -6371,6 +6376,8 @@ version(D_HardFloat) @safe unittest // rounding
         assert(z == u);
     }}
 }
+
+} // D_HardFloat
 
 
 /*********************************

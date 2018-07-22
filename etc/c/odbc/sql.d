@@ -24,6 +24,8 @@ See_Also: $(LINK2 https://docs.microsoft.com/en-us/sql/odbc/reference/syntax/odb
 
 module etc.c.odbc.sql;
 
+version (WebAssembly) {} else:
+
 public import etc.c.odbc.sqltypes;
 
 extern (Windows):
