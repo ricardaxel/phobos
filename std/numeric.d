@@ -622,7 +622,7 @@ public:
     }
 }
 
-@safe unittest
+version(none) @safe unittest
 {
     import std.meta;
     alias FPTypes =
@@ -658,7 +658,7 @@ public:
     }
 }
 
-@system unittest
+version(none) @system unittest
 {
     // @system due to to!string(CustomFloat)
     import std.conv;
