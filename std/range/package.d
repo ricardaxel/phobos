@@ -349,15 +349,7 @@ if (isBidirectionalRange!(Unqual!Range))
                     }
             }
 
-            static if (hasLength!R)
-            {
-                @property auto length()
-                {
-                    return source.length;
-                }
-
-                alias opDollar = length;
-            }
+            mixin ImplementLength!source;
         }
 
         return Result!()(r);
@@ -4726,7 +4718,7 @@ if (Ranges.length && allSatisfy!(isInputRange, Ranges))
             static foreach (i, Range; Ranges)
                 static if (hasLength!Range)
                 {
-                    static if (!anySatisfy!(hasLength, Ranges[0 .. i]))
+                    static if (!is(typeof(minLen) == size_t))
                         size_t minLen = ranges[i].length;
                     else
                     {{
@@ -5085,29 +5077,20 @@ if (Ranges.length && allSatisfy!(isInputRange, Ranges))
     {
         @property size_t length()
         {
-            static if (allKnownSameLength)
-            {
-                static foreach (i, Range; Ranges)
+           static foreach (i, Range; Ranges)
+           {
+                static if (hasLength!Range)
                 {
-                    static if (hasLength!Range && !anySatisfy!(hasLength, Ranges[0 .. i]))
-                        return ranges[i].length;
+                    static if (!is(typeof(minLen) == size_t))
+                        size_t minLen = ranges[i].length;
+                    else static if (!allKnownSameLength)
+                    {{
+                        const x = ranges[i].length;
+                        if (x < minLen) minLen = x;
+                    }}
                 }
             }
-            else
-            {
-                static foreach (i, Range; Ranges)
-                    static if (hasLength!Range)
-                    {
-                        static if (!anySatisfy!(hasLength, Ranges[0 .. i]))
-                            size_t minLen = ranges[i].length;
-                        else
-                        {{
-                            const x = ranges[i].length;
-                            if (x < minLen) minLen = x;
-                        }}
-                    }
-                return minLen;
-            }
+            return minLen;
         }
 
         alias opDollar = length;
@@ -7075,16 +7058,7 @@ struct FrontTransversal(Ror,
                 _input[n].front = val;
             }
         }
-        /// Ditto
-        static if (hasLength!RangeOfRanges)
-        {
-            @property size_t length()
-            {
-                return _input.length;
-            }
-
-            alias opDollar = length;
-        }
+        mixin ImplementLength!_input;
 
 /**
    Slicing if offered if `RangeOfRanges` supports slicing and all the
@@ -7414,16 +7388,7 @@ struct Transversal(Ror,
             }
         }
 
-        /// Ditto
-        static if (hasLength!RangeOfRanges)
-        {
-            @property size_t length()
-            {
-                return _input.length;
-            }
-
-            alias opDollar = length;
-        }
+        mixin ImplementLength!_input;
 
 /**
    Slicing if offered if `RangeOfRanges` supports slicing and all the
@@ -7853,16 +7818,7 @@ if (isRandomAccessRange!Source && isInputRange!Indices &&
         }
     }
 
-    static if (hasLength!Indices)
-    {
-        /// Ditto
-         @property size_t length()
-        {
-            return _indices.length;
-        }
-
-        alias opDollar = length;
-    }
+    mixin ImplementLength!_indices;
 
     static if (isRandomAccessRange!Indices)
     {
@@ -10304,12 +10260,7 @@ do
 
         static if (hasLength!Range)
         {
-            size_t length() @property
-            {
-                return range.length;
-            }
-
-            alias opDollar = length;
+            mixin ImplementLength!range;
 
             static if (isBidirectionalRange!Range)
             {
@@ -10852,15 +10803,7 @@ if (isInputRange!Range && !isInstanceOf!(SortedRange, Range))
             return result;
         }
 
-    /// Ditto
-    static if (hasLength!Range)
-    {
-        @property size_t length()          //const
-        {
-            return _input.length;
-        }
-        alias opDollar = length;
-    }
+    mixin ImplementLength!_input;
 
 /**
    Releases the controlled range and returns it.
@@ -11769,15 +11712,11 @@ public:
 
     version (StdDdoc)
     {
-        /++
-            Only defined if `hasLength!R` is `true`.
-          +/
-        @property auto length() {assert(0);}
-
-        /++ Ditto +/
-        @property auto length() const {assert(0);}
-
-        /++ Ditto +/
+        /// Only defined if `hasLength!R` is `true`.
+        @property size_t length();
+        /// ditto
+        @property size_t length() const;
+        /// Ditto
         alias opDollar = length;
     }
     else static if (hasLength!R)
@@ -11786,12 +11725,10 @@ public:
         {
             return (*_range).length;
         }
-
         static if (is(typeof((*cast(const R*)_range).length))) @property auto length() const
         {
             return (*_range).length;
         }
-
         alias opDollar = length;
     }
 
@@ -12843,13 +12780,7 @@ if (isInputRange!R1 && isOutputRange!(R2, ElementType!R1))
             private bool _frontAccessed;
         }
 
-        static if (hasLength!R1)
-        {
-            @property auto length()
-            {
-                return _input.length;
-            }
-        }
+        mixin ImplementLength!_input;
 
         static if (isInfinite!R1)
         {
