@@ -376,7 +376,7 @@ struct Group(DataIndex)
         if (begin < end)
             return "(unmatched)";
         import std.array : appender;
-        import std.format : formattedWrite;
+        import std.format.write : formattedWrite;
         auto a = appender!string();
         formattedWrite(a, "%s..%s", begin, end);
         return a.data;
@@ -387,7 +387,7 @@ struct Group(DataIndex)
 @trusted string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
 {
     import std.array : appender;
-    import std.format : formattedWrite;
+    import std.format.write : formattedWrite;
     auto output = appender!string();
     formattedWrite(output,"%s", irb[pc].mnemonic);
     switch (irb[pc].code)
@@ -527,7 +527,7 @@ class RuntimeFactory(alias EngineType, Char) : GenericFactory!(EngineType, Char)
 {
     override EngineType!Char construct(const ref Regex!Char re, in Char[] input, void[] memory) const
     {
-        import std.conv : emplace;
+        import core.lifetime : emplace;
         return emplace!(EngineType!Char)(memory[0 .. classSize],
             re, Input!Char(input), memory[classSize .. $]);
     }
@@ -538,43 +538,62 @@ class CtfeFactory(alias EngineType, Char, alias func) : GenericFactory!(EngineTy
 {
     override EngineType!Char construct(const ref Regex!Char re, in Char[] input, void[] memory) const
     {
-        import std.conv : emplace;
+        import core.lifetime : emplace;
         return emplace!(EngineType!Char)(memory[0 .. classSize],
             re, &func, Input!Char(input), memory[classSize .. $]);
     }
 }
 
+private auto defaultFactoryImpl(Char)(const ref Regex!Char re)
+{
+    import std.regex.internal.backtracking : BacktrackingMatcher;
+    import std.regex.internal.thompson : ThompsonMatcher;
+    import std.algorithm.searching : canFind;
+    static MatcherFactory!Char backtrackingFactory;
+    static MatcherFactory!Char thompsonFactory;
+    if (re.backrefed.canFind!"a != 0")
+    {
+        if (backtrackingFactory is null)
+            backtrackingFactory = new RuntimeFactory!(BacktrackingMatcher, Char);
+        return backtrackingFactory;
+    }
+    else
+    {
+        if (thompsonFactory is null)
+            thompsonFactory = new RuntimeFactory!(ThompsonMatcher, Char);
+        return thompsonFactory;
+    }
+}
+
+// Used to generate a pure wrapper for defaultFactoryImpl. Based on the example in
+// the std.traits.SetFunctionAttributes documentation.
+auto assumePureFunction(T)(T t)
+if (isFunctionPointer!T)
+{
+    enum attrs = functionAttributes!T | FunctionAttribute.pure_;
+    return cast(SetFunctionAttributes!(T, functionLinkage!T, attrs)) t;
+}
+
 // A workaround for R-T enum re = regex(...)
 template defaultFactory(Char)
 {
+    // defaultFactory is constructed as a safe, pure wrapper over defaultFactoryImpl.
+    // It can be faked as pure because the static mutable variables are used to cache
+    // the key and character matcher. The technique used avoids delegates and GC.
     @property MatcherFactory!Char defaultFactory(const ref Regex!Char re) @safe pure
     {
-        auto defaultFactoryImpl = () {
-            import std.regex.internal.backtracking : BacktrackingMatcher;
-            import std.regex.internal.thompson : ThompsonMatcher;
-            import std.algorithm.searching : canFind;
-            static MatcherFactory!Char backtrackingFactory;
-            static MatcherFactory!Char thompsonFactory;
-            if (re.backrefed.canFind!"a != 0")
-            {
-                if (backtrackingFactory is null)
-                    backtrackingFactory = new RuntimeFactory!(BacktrackingMatcher, Char);
-                return backtrackingFactory;
-            }
-            else
-            {
-                if (thompsonFactory is null)
-                    thompsonFactory = new RuntimeFactory!(ThompsonMatcher, Char);
-                return thompsonFactory;
-            }
-        };
+        static auto impl(const ref Regex!Char re)
+        {
+            return defaultFactoryImpl(re);
+        }
 
-        // this should be faked as pure because the static mutable variables are
-        // used to cache the created instance, like memoize
-        alias T = typeof(defaultFactoryImpl);
-        enum attrs = functionAttributes!T | FunctionAttribute.pure_;
-        return (() @trusted =>
-            (cast(SetFunctionAttributes!(T, functionLinkage!T, attrs)) defaultFactoryImpl))()();
+        static auto pureImpl(const ref Regex!Char re) @trusted
+        {
+            auto p = assumePureFunction(&impl);
+            return p(re);
+        }
+
+        return pureImpl(re);
     }
 }
 
