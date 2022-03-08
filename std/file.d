@@ -89,7 +89,7 @@ import std.datetime.date : DateTime;
 import std.datetime.systime : Clock, SysTime, unixTimeToStdTime;
 import std.internal.cstring;
 import std.meta;
-import std.range.primitives;
+import std.range;
 import std.traits;
 import std.typecons;
 
@@ -143,7 +143,7 @@ else
 
 version (StdUnittest) private struct TestAliasedString
 {
-    string get() @safe @nogc pure nothrow { return _s; }
+    string get() @safe @nogc pure nothrow return scope { return _s; }
     alias get this;
     @disable this(this);
     string _s;
@@ -313,8 +313,7 @@ Throws: $(LREF FileException) on error.
  */
 
 void[] read(R)(R name, size_t upTo = size_t.max)
-if (isInputRange!R && isSomeChar!(ElementEncodingType!R) && !isInfinite!R &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         return readImpl(name, name.tempCString!FSChar(), upTo);
@@ -356,7 +355,7 @@ version (Posix) private void[] readImpl(scope const(char)[] name, scope const(FS
     import core.memory : GC;
     import std.algorithm.comparison : min;
     import std.conv : to;
-    import std.experimental.checkedint : checked;
+    import std.checkedint : checked;
 
     // A few internal configuration parameters {
     enum size_t
@@ -400,26 +399,24 @@ version (Posix) private void[] readImpl(scope const(char)[] name, scope const(FS
         : result[0 .. size.get];
 }
 
+version (Windows)
+private extern (Windows) @nogc nothrow
+{
+    pragma(mangle, CreateFileW.mangleof)
+    HANDLE trustedCreateFileW(scope const(wchar)* namez, DWORD dwDesiredAccess,
+        DWORD dwShareMode, SECURITY_ATTRIBUTES* lpSecurityAttributes,
+        DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes,
+        HANDLE hTemplateFile)  @trusted;
+
+    pragma(mangle, CloseHandle.mangleof) BOOL trustedCloseHandle(HANDLE) @trusted;
+}
 
 version (Windows) private void[] readImpl(scope const(char)[] name, scope const(FSChar)* namez,
-                                          size_t upTo = size_t.max) @safe
+                                          size_t upTo = size_t.max) @trusted
 {
     import core.memory : GC;
     import std.algorithm.comparison : min;
-    static trustedCreateFileW(scope const(wchar)* namez, DWORD dwDesiredAccess, DWORD dwShareMode,
-                              SECURITY_ATTRIBUTES *lpSecurityAttributes, DWORD dwCreationDisposition,
-                              DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) @trusted
-    {
-        return CreateFileW(namez, dwDesiredAccess, dwShareMode,
-                           lpSecurityAttributes, dwCreationDisposition,
-                           dwFlagsAndAttributes, hTemplateFile);
-
-    }
-    static trustedCloseHandle(HANDLE hObject) @trusted
-    {
-        return CloseHandle(hObject);
-    }
-    static trustedGetFileSize(HANDLE hFile, out ulong fileSize) @trusted
+    static trustedGetFileSize(HANDLE hFile, out ulong fileSize)
     {
         DWORD sizeHigh;
         DWORD sizeLow = GetFileSize(hFile, &sizeHigh);
@@ -428,7 +425,7 @@ version (Windows) private void[] readImpl(scope const(char)[] name, scope const(
             fileSize = makeUlong(sizeLow, sizeHigh);
         return result;
     }
-    static trustedReadFile(HANDLE hFile, void *lpBuffer, ulong nNumberOfBytesToRead) @trusted
+    static trustedReadFile(HANDLE hFile, void *lpBuffer, ulong nNumberOfBytesToRead)
     {
         // Read by chunks of size < 4GB (Windows API limit)
         ulong totalNumRead = 0;
@@ -456,11 +453,11 @@ version (Windows) private void[] readImpl(scope const(char)[] name, scope const(
     ulong fileSize = void;
     cenforce(trustedGetFileSize(h, fileSize), name, namez);
     size_t size = min(upTo, fileSize);
-    auto buf = () @trusted { return GC.malloc(size, GC.BlkAttr.NO_SCAN)[0 .. size]; } ();
+    auto buf = () { return GC.malloc(size, GC.BlkAttr.NO_SCAN)[0 .. size]; } ();
 
     scope(failure)
     {
-        () @trusted { GC.free(buf.ptr); } ();
+        () { GC.free(buf.ptr); } ();
     }
 
     if (size)
@@ -502,7 +499,7 @@ version (linux) @safe unittest
             $(REF UTFException, std, utf) on UTF decoding error.
 +/
 S readText(S = string, R)(auto ref R name)
-if (isSomeString!S && (isInputRange!R && !isInfinite!R && isSomeChar!(ElementType!R) || is(StringTypeOf!R)))
+if (isSomeString!S && (isSomeFiniteCharInputRange!R || is(StringTypeOf!R)))
 {
     import std.algorithm.searching : startsWith;
     import std.encoding : getBOM, BOM;
@@ -738,8 +735,7 @@ Throws: $(LREF FileException) on error.
 See_also: $(REF toFile, std,stdio)
  */
 void write(R)(R name, const void[] buffer)
-if ((isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) || isSomeString!R) &&
-    !isConvertibleToString!R)
+if ((isSomeFiniteCharInputRange!R || isSomeString!R) && !isConvertibleToString!R)
 {
     static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         writeImpl(name, name.tempCString!FSChar(), buffer, false);
@@ -787,8 +783,7 @@ Params:
 Throws: $(LREF FileException) on error.
  */
 void append(R)(R name, const void[] buffer)
-if ((isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) || isSomeString!R) &&
-    !isConvertibleToString!R)
+if ((isSomeFiniteCharInputRange!R || isSomeString!R) && !isConvertibleToString!R)
 {
     static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         writeImpl(name, name.tempCString!FSChar(), buffer, true);
@@ -917,10 +912,8 @@ version (Windows) private void writeImpl(scope const(char)[] name, scope const(F
  * Throws: $(LREF FileException) on error.
  */
 void rename(RF, RT)(RF from, RT to)
-if ((isInputRange!RF && !isInfinite!RF && isSomeChar!(ElementEncodingType!RF) || isSomeString!RF)
-    && !isConvertibleToString!RF &&
-    (isInputRange!RT && !isInfinite!RT && isSomeChar!(ElementEncodingType!RT) || isSomeString!RT)
-    && !isConvertibleToString!RT)
+if ((isSomeFiniteCharInputRange!RF || isSomeString!RF) && !isConvertibleToString!RF &&
+    (isSomeFiniteCharInputRange!RT || isSomeString!RT) && !isConvertibleToString!RT)
 {
     // Place outside of @trusted block
     auto fromz = from.tempCString!FSChar();
@@ -1029,8 +1022,7 @@ Params:
 Throws: $(LREF FileException) on error.
  */
 void remove(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         removeImpl(name, name.tempCString!FSChar());
@@ -1084,7 +1076,7 @@ private void removeImpl(scope const(char)[] name, scope const(FSChar)* namez) @t
 }
 
 version (Windows) private WIN32_FILE_ATTRIBUTE_DATA getFileAttributesWin(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R))
+if (isSomeFiniteCharInputRange!R)
 {
     auto namez = name.tempCString!FSChar();
 
@@ -1125,6 +1117,9 @@ version (Windows) private ulong makeUlong(DWORD dwLow, DWORD dwHigh) @safe pure 
     return li.QuadPart;
 }
 
+version (Posix) private extern (C) pragma(mangle, stat.mangleof)
+int trustedStat(scope const(FSChar)* namez, ref stat_t buf) @nogc nothrow @trusted;
+
 /**
 Get size of file `name` in bytes.
 
@@ -1136,8 +1131,7 @@ Throws:
     $(LREF FileException) on error (e.g., file not found).
  */
 ulong getSize(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
@@ -1148,10 +1142,6 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     {
         auto namez = name.tempCString();
 
-        static trustedStat(const(FSChar)* namez, out stat_t buf) @trusted
-        {
-            return stat(namez, &buf);
-        }
         static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
@@ -1236,8 +1226,7 @@ private SysTime statTimeToStdTime(char which)(ref const stat_t statbuf)
 void getTimes(R)(R name,
               out SysTime accessTime,
               out SysTime modificationTime)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
@@ -1253,10 +1242,6 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     {
         auto namez = name.tempCString();
 
-        static auto trustedStat(const(FSChar)* namez, ref stat_t buf) @trusted
-        {
-            return stat(namez, &buf);
-        }
         stat_t statbuf = void;
 
         static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
@@ -1385,8 +1370,9 @@ version (StdDdoc)
                         out SysTime fileCreationTime,
                         out SysTime fileAccessTime,
                         out SysTime fileModificationTime)
-    if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-        !isConvertibleToString!R);
+    if (isSomeFiniteCharInputRange!R || isConvertibleToString!R);
+    // above line contains both constraints for docs
+    // (so users know how it can be called)
 }
 else version (Windows)
 {
@@ -1394,8 +1380,7 @@ else version (Windows)
                         out SysTime fileCreationTime,
                         out SysTime fileAccessTime,
                         out SysTime fileModificationTime)
-    if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-        !isConvertibleToString!R)
+    if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
     {
         import std.datetime.systime : FILETIMEToSysTime;
 
@@ -1516,8 +1501,7 @@ private
 void setTimes(R)(R name,
               SysTime accessTime,
               SysTime modificationTime)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     auto namez = name.tempCString!FSChar();
     static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
@@ -1664,8 +1648,7 @@ private void setTimesImpl(scope const(char)[] names, scope const(FSChar)* namez,
         $(LREF FileException) if the given file does not exist.
 +/
 SysTime timeLastModified(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
@@ -1679,10 +1662,6 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     else version (Posix)
     {
         auto namez = name.tempCString!FSChar();
-        static auto trustedStat(const(FSChar)* namez, ref stat_t buf) @trusted
-        {
-            return stat(namez, &buf);
-        }
         stat_t statbuf = void;
 
         static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
@@ -1753,7 +1732,7 @@ else
 --------------------
 +/
 SysTime timeLastModified(R)(R name, SysTime returnIfMissing)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R))
+if (isSomeFiniteCharInputRange!R)
 {
     version (Windows)
     {
@@ -1770,10 +1749,6 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R))
     else version (Posix)
     {
         auto namez = name.tempCString!FSChar();
-        static auto trustedStat(const(FSChar)* namez, ref stat_t buf) @trusted
-        {
-            return stat(namez, &buf);
-        }
         stat_t statbuf = void;
 
         return trustedStat(namez, statbuf) != 0 ?
@@ -1846,7 +1821,7 @@ else version (Posix)
         stat_t statbuf;
         // check that both lvalues and rvalues work
         timeLastAccessed(statbuf);
-        timeLastAccessed(stat_t.init);
+        cast(void) timeLastAccessed(stat_t.init);
     }
 }
 
@@ -1917,8 +1892,7 @@ version (OSX) {} else
  *    true if the file _name specified as input _exists
  */
 bool exists(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     return existsImpl(name.tempCString!FSChar());
 }
@@ -1943,7 +1917,7 @@ if (isConvertibleToString!R)
     assert(!f.exists);
 }
 
-private bool existsImpl(const(FSChar)* namez) @trusted nothrow @nogc
+private bool existsImpl(scope const(FSChar)* namez) @trusted nothrow @nogc
 {
     version (Windows)
     {
@@ -2019,13 +1993,12 @@ private bool existsImpl(const(FSChar)* namez) @trusted nothrow @nogc
  Throws: $(LREF FileException) on error.
   +/
 uint getAttributes(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
         auto namez = name.tempCString!FSChar();
-        static auto trustedGetFileAttributesW(const(FSChar)* namez) @trusted
+        static auto trustedGetFileAttributesW(scope const(FSChar)* namez) @trusted
         {
             return GetFileAttributesW(namez);
         }
@@ -2042,10 +2015,6 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     else version (Posix)
     {
         auto namez = name.tempCString!FSChar();
-        static auto trustedStat(const(FSChar)* namez, ref stat_t buf) @trusted
-        {
-            return stat(namez, &buf);
-        }
         stat_t statbuf = void;
 
         static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
@@ -2124,8 +2093,7 @@ if (isConvertibleToString!R)
         $(LREF FileException) on error.
  +/
 uint getLinkAttributes(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
@@ -2233,13 +2201,12 @@ if (isConvertibleToString!R)
         $(LREF FileException) if the given file does not exist.
  +/
 void setAttributes(R)(R name, uint attributes)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
         auto namez = name.tempCString!FSChar();
-        static auto trustedSetFileAttributesW(const(FSChar)* namez, uint dwFileAttributes) @trusted
+        static auto trustedSetFileAttributesW(scope const(FSChar)* namez, uint dwFileAttributes) @trusted
         {
             return SetFileAttributesW(namez, dwFileAttributes);
         }
@@ -2252,7 +2219,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     else version (Posix)
     {
         auto namez = name.tempCString!FSChar();
-        static auto trustedChmod(const(FSChar)* namez, mode_t mode) @trusted
+        static auto trustedChmod(scope const(FSChar)* namez, mode_t mode) @trusted
         {
             return chmod(namez, mode);
         }
@@ -2342,8 +2309,7 @@ if (isConvertibleToString!R)
         $(LREF FileException) if the given file does not exist.
   +/
 @property bool isDir(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
     {
@@ -2522,8 +2488,7 @@ bool attrIsDir(uint attributes) @safe pure nothrow @nogc
         $(LREF FileException) if the given file does not exist.
 +/
 @property bool isFile(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
         return !name.isDir;
@@ -2698,8 +2663,7 @@ bool attrIsFile(uint attributes) @safe pure nothrow @nogc
         $(LREF FileException) if the given file does not exist.
   +/
 @property bool isSymlink(R)(R name)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     version (Windows)
         return (getAttributes(name) & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
@@ -2879,22 +2843,21 @@ Params:
 Throws: $(LREF FileException) on error.
  */
 void chdir(R)(R pathname)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     // Place outside of @trusted block
     auto pathz = pathname.tempCString!FSChar();
 
     version (Windows)
     {
-        static auto trustedChdir(const(FSChar)* pathz) @trusted
+        static auto trustedChdir(scope const(FSChar)* pathz) @trusted
         {
             return SetCurrentDirectoryW(pathz);
         }
     }
     else version (Posix)
     {
-        static auto trustedChdir(const(FSChar)* pathz) @trusted
+        static auto trustedChdir(scope const(FSChar)* pathz) @trusted
         {
             return core.sys.posix.unistd.chdir(pathz) == 0;
         }
@@ -2917,6 +2880,8 @@ if (isConvertibleToString!R)
 @system unittest
 {
     import std.algorithm.comparison : equal;
+    import std.algorithm.sorting : sort;
+    import std.array : array;
     import std.path : buildPath;
 
     auto cwd = getcwd;
@@ -2927,9 +2892,9 @@ if (isConvertibleToString!R)
     dir.buildPath("a").write(".");
     dir.chdir; // step into dir
     "b".write(".");
-    dirEntries(".", SpanMode.shallow).equal(
-        [".".buildPath("b"), ".".buildPath("a")]
-    );
+    assert(dirEntries(".", SpanMode.shallow).array.sort.equal(
+        [".".buildPath("a"), ".".buildPath("b")]
+    ));
 }
 
 @safe unittest
@@ -2948,15 +2913,14 @@ Throws:
     if an error occured.
  */
 void mkdir(R)(R pathname)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     // Place outside of @trusted block
     const pathz = pathname.tempCString!FSChar();
 
     version (Windows)
     {
-        static auto trustedCreateDirectoryW(const(FSChar)* pathz) @trusted
+        static auto trustedCreateDirectoryW(scope const(FSChar)* pathz) @trusted
         {
             return CreateDirectoryW(pathz, null);
         }
@@ -2970,7 +2934,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     {
         import std.conv : octal;
 
-        static auto trustedMkdir(const(FSChar)* pathz, mode_t mode) @trusted
+        static auto trustedMkdir(scope const(FSChar)* pathz, mode_t mode) @trusted
         {
             return core.sys.posix.sys.stat.mkdir(pathz, mode);
         }
@@ -3152,22 +3116,21 @@ Params:
 Throws: $(LREF FileException) on error.
  */
 void rmdir(R)(R pathname)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
-    !isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R && !isConvertibleToString!R)
 {
     // Place outside of @trusted block
     auto pathz = pathname.tempCString!FSChar();
 
     version (Windows)
     {
-        static auto trustedRmdir(const(FSChar)* pathz) @trusted
+        static auto trustedRmdir(scope const(FSChar)* pathz) @trusted
         {
             return RemoveDirectoryW(pathz);
         }
     }
     else version (Posix)
     {
-        static auto trustedRmdir(const(FSChar)* pathz) @trusted
+        static auto trustedRmdir(scope const(FSChar)* pathz) @trusted
         {
             return core.sys.posix.unistd.rmdir(pathz) == 0;
         }
@@ -3219,15 +3182,11 @@ if (isConvertibleToString!R)
         exists).
   +/
 version (StdDdoc) void symlink(RO, RL)(RO original, RL link)
-if ((isInputRange!RO && !isInfinite!RO && isSomeChar!(ElementEncodingType!RO) ||
-    isConvertibleToString!RO) &&
-    (isInputRange!RL && !isInfinite!RL && isSomeChar!(ElementEncodingType!RL) ||
-    isConvertibleToString!RL));
+if ((isSomeFiniteCharInputRange!RO || isConvertibleToString!RO) &&
+    (isSomeFiniteCharInputRange!RL || isConvertibleToString!RL));
 else version (Posix) void symlink(RO, RL)(RO original, RL link)
-if ((isInputRange!RO && !isInfinite!RO && isSomeChar!(ElementEncodingType!RO) ||
-    isConvertibleToString!RO) &&
-    (isInputRange!RL && !isInfinite!RL && isSomeChar!(ElementEncodingType!RL) ||
-    isConvertibleToString!RL))
+if ((isSomeFiniteCharInputRange!RO || isConvertibleToString!RO) &&
+    (isSomeFiniteCharInputRange!RL || isConvertibleToString!RL))
 {
     static if (isConvertibleToString!RO || isConvertibleToString!RL)
     {
@@ -3308,11 +3267,9 @@ version (Posix) @safe unittest
         $(LREF FileException) on error.
   +/
 version (StdDdoc) string readLink(R)(R link)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) ||
-    isConvertibleToString!R);
+if (isSomeFiniteCharInputRange!R || isConvertibleToString!R);
 else version (Posix) string readLink(R)(R link)
-if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) ||
-    isConvertibleToString!R)
+if (isSomeFiniteCharInputRange!R || isConvertibleToString!R)
 {
     static if (isConvertibleToString!R)
     {
@@ -3409,7 +3366,7 @@ version (Posix) @system unittest // input range of dchars
 version (Windows) string getcwd() @trusted
 {
     import std.conv : to;
-    import std.experimental.checkedint : checked;
+    import std.checkedint : checked;
     /* GetCurrentDirectory's return value:
         1. function succeeds: the number of characters that are written to
     the buffer, not including the terminating null character.
@@ -3672,7 +3629,7 @@ auto de2 = DirEntry("/usr/share/include");
 assert(de2.name == "/usr/share/include");
 --------------------
           +/
-        @property string name() const;
+        @property string name() const return scope;
 
 
         /++
@@ -3688,7 +3645,7 @@ auto de2 = DirEntry("/usr/share/include");
 assert(de2.isDir);
 --------------------
           +/
-        @property bool isDir();
+        @property bool isDir() scope;
 
 
         /++
@@ -3714,7 +3671,7 @@ auto de2 = DirEntry("/usr/share/include");
 assert(!de2.isFile);
 --------------------
           +/
-        @property bool isFile();
+        @property bool isFile() scope;
 
         /++
             Returns whether the file represented by this `DirEntry` is a
@@ -3723,13 +3680,13 @@ assert(!de2.isFile);
             On Windows, return `true` when the file is either a symbolic
             link or a junction point.
           +/
-        @property bool isSymlink();
+        @property bool isSymlink() scope;
 
         /++
             Returns the size of the the file represented by this `DirEntry`
             in bytes.
           +/
-        @property ulong size();
+        @property ulong size() scope;
 
         /++
             $(BLUE This function is Windows-Only.)
@@ -3737,7 +3694,7 @@ assert(!de2.isFile);
             Returns the creation time of the file represented by this
             `DirEntry`.
           +/
-        @property SysTime timeCreated() const;
+        @property SysTime timeCreated() const scope;
 
         /++
             Returns the time that the file represented by this `DirEntry` was
@@ -3748,13 +3705,13 @@ assert(!de2.isFile);
             `timeLastAccessed` will return the same value as
             `timeLastModified`.
           +/
-        @property SysTime timeLastAccessed();
+        @property SysTime timeLastAccessed() scope;
 
         /++
             Returns the time that the file represented by this `DirEntry` was
             last modified.
           +/
-        @property SysTime timeLastModified();
+        @property SysTime timeLastModified() scope;
 
         /++
             $(BLUE This function is POSIX-Only.)
@@ -3762,7 +3719,7 @@ assert(!de2.isFile);
             Returns the time that the file represented by this `DirEntry` was
             last changed (not only in contents, but also in permissions or ownership).
           +/
-        @property SysTime timeStatusChanged() const;
+        @property SysTime timeStatusChanged() const scope;
 
         /++
             Returns the _attributes of the file represented by this `DirEntry`.
@@ -3778,7 +3735,7 @@ assert(!de2.isFile);
             symbolic link, then _attributes are the _attributes of the file
             pointed to by the symbolic link.
           +/
-        @property uint attributes();
+        @property uint attributes() scope;
 
         /++
             On POSIX systems, if the file represented by this `DirEntry` is a
@@ -3790,7 +3747,7 @@ assert(!de2.isFile);
             exists on Windows so that you don't have to special-case code for
             Windows when dealing with symbolic links.
           +/
-        @property uint linkAttributes();
+        @property uint linkAttributes() scope;
 
         version (Windows)
             alias stat_t = void*;
@@ -3800,7 +3757,7 @@ assert(!de2.isFile);
 
             The `stat` struct gotten from calling `stat`.
           +/
-        @property stat_t statBuf();
+        @property stat_t statBuf() scope;
     }
 }
 else version (Windows)
@@ -3848,17 +3805,17 @@ else version (Windows)
             _attributes = fd.dwFileAttributes;
         }
 
-        @property string name() const pure nothrow
+        @property string name() const pure nothrow return scope
         {
             return _name;
         }
 
-        @property bool isDir() const pure nothrow
+        @property bool isDir() const pure nothrow scope
         {
             return (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         }
 
-        @property bool isFile() const pure nothrow
+        @property bool isFile() const pure nothrow scope
         {
             //Are there no options in Windows other than directory and file?
             //If there are, then this probably isn't the best way to determine
@@ -3866,37 +3823,37 @@ else version (Windows)
             return !isDir;
         }
 
-        @property bool isSymlink() const pure nothrow
+        @property bool isSymlink() const pure nothrow scope
         {
             return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         }
 
-        @property ulong size() const pure nothrow
+        @property ulong size() const pure nothrow scope
         {
             return _size;
         }
 
-        @property SysTime timeCreated() const pure nothrow
+        @property SysTime timeCreated() const pure nothrow return scope
         {
             return cast(SysTime)_timeCreated;
         }
 
-        @property SysTime timeLastAccessed() const pure nothrow
+        @property SysTime timeLastAccessed() const pure nothrow return scope
         {
             return cast(SysTime)_timeLastAccessed;
         }
 
-        @property SysTime timeLastModified() const pure nothrow
+        @property SysTime timeLastModified() const pure nothrow return scope
         {
             return cast(SysTime)_timeLastModified;
         }
 
-        @property uint attributes() const pure nothrow
+        @property uint attributes() const pure nothrow scope
         {
             return _attributes;
         }
 
-        @property uint linkAttributes() const pure nothrow
+        @property uint linkAttributes() const pure nothrow scope
         {
             return _attributes;
         }
@@ -3971,74 +3928,74 @@ else version (Posix)
             }
         }
 
-        @property string name() const pure nothrow
+        @property string name() const pure nothrow return scope
         {
             return _name;
         }
 
-        @property bool isDir()
+        @property bool isDir() scope
         {
             _ensureStatOrLStatDone();
 
             return (_statBuf.st_mode & S_IFMT) == S_IFDIR;
         }
 
-        @property bool isFile()
+        @property bool isFile() scope
         {
             _ensureStatOrLStatDone();
 
             return (_statBuf.st_mode & S_IFMT) == S_IFREG;
         }
 
-        @property bool isSymlink()
+        @property bool isSymlink() scope
         {
             _ensureLStatDone();
 
             return (_lstatMode & S_IFMT) == S_IFLNK;
         }
 
-        @property ulong size()
+        @property ulong size() scope
         {
             _ensureStatDone();
             return _statBuf.st_size;
         }
 
-        @property SysTime timeStatusChanged()
+        @property SysTime timeStatusChanged() scope
         {
             _ensureStatDone();
 
             return statTimeToStdTime!'c'(_statBuf);
         }
 
-        @property SysTime timeLastAccessed()
+        @property SysTime timeLastAccessed() scope
         {
             _ensureStatDone();
 
             return statTimeToStdTime!'a'(_statBuf);
         }
 
-        @property SysTime timeLastModified()
+        @property SysTime timeLastModified() scope
         {
             _ensureStatDone();
 
             return statTimeToStdTime!'m'(_statBuf);
         }
 
-        @property uint attributes()
+        @property uint attributes() scope
         {
             _ensureStatDone();
 
             return _statBuf.st_mode;
         }
 
-        @property uint linkAttributes()
+        @property uint linkAttributes() scope
         {
             _ensureLStatDone();
 
             return _lstatMode;
         }
 
-        @property stat_t statBuf()
+        @property stat_t statBuf() scope
         {
             _ensureStatDone();
 
@@ -4050,7 +4007,7 @@ else version (Posix)
             This is to support lazy evaluation, because doing stat's is
             expensive and not always needed.
          +/
-        void _ensureStatDone() @trusted
+        void _ensureStatDone() @trusted scope
         {
             import std.exception : enforce;
 
@@ -4070,7 +4027,7 @@ else version (Posix)
             Try both stat and lstat for isFile and isDir
             to detect broken symlinks.
          +/
-        void _ensureStatOrLStatDone() @trusted
+        void _ensureStatOrLStatDone() @trusted scope
         {
             if (_didStat)
                 return;
@@ -4092,7 +4049,7 @@ else version (Posix)
             This is to support lazy evaluation, because doing stat's is
             expensive and not always needed.
          +/
-        void _ensureLStatDone() @trusted
+        void _ensureLStatDone() @trusted scope
         {
             import std.exception : enforce;
 
@@ -4233,8 +4190,8 @@ Params:
 Throws: $(LREF FileException) on error.
  */
 void copy(RF, RT)(RF from, RT to, PreserveAttributes preserve = preserveAttributesDefault)
-if (isInputRange!RF && !isInfinite!RF && isSomeChar!(ElementEncodingType!RF) && !isConvertibleToString!RF &&
-    isInputRange!RT && !isInfinite!RT && isSomeChar!(ElementEncodingType!RT) && !isConvertibleToString!RT)
+if (isSomeFiniteCharInputRange!RF && !isConvertibleToString!RF &&
+    isSomeFiniteCharInputRange!RT && !isConvertibleToString!RT)
 {
     // Place outside of @trusted block
     auto fromz = from.tempCString!FSChar();
@@ -4605,6 +4562,8 @@ enum SpanMode
 {
     import std.algorithm.comparison : equal;
     import std.algorithm.iteration : map;
+    import std.algorithm.sorting : sort;
+    import std.array : array;
     import std.path : buildPath, relativePath;
 
     auto root = deleteme ~ "root";
@@ -4613,19 +4572,19 @@ enum SpanMode
 
     root.buildPath("animals").mkdir;
     root.buildPath("animals", "cat").mkdir;
-    root.buildPath("animals", "dog").mkdir;
+
+    alias removeRoot = (return scope e) => e.relativePath(root);
+
+    assert(root.dirEntries(SpanMode.depth).map!removeRoot.equal(
+        [buildPath("animals", "cat"), "animals"]));
+
+    assert(root.dirEntries(SpanMode.breadth).map!removeRoot.equal(
+        ["animals", buildPath("animals", "cat")]));
+
     root.buildPath("plants").mkdir;
 
-    alias removeRoot = (e) => e.relativePath(root);
-
-    root.dirEntries(SpanMode.shallow).map!removeRoot.equal(
-        ["plants", "animals"]);
-
-    root.dirEntries(SpanMode.depth).map!removeRoot.equal(
-        ["plants", "animals/dog", "animals/cat", "animals"]);
-
-    root.dirEntries(SpanMode.breadth).map!removeRoot.equal(
-        ["plants", "animals", "animals/dog", "animals/cat"]);
+    assert(root.dirEntries(SpanMode.shallow).array.sort.map!removeRoot.equal(
+        ["animals", "plants"]));
 }
 
 private struct DirIteratorImpl
@@ -4796,7 +4755,7 @@ private struct DirIteratorImpl
     }
 
     this(R)(R pathname, SpanMode mode, bool followSymlink)
-        if (isInputRange!R && isSomeChar!(ElementEncodingType!R))
+        if (isSomeFiniteCharInputRange!R)
     {
         _mode = mode;
         _followSymlink = followSymlink;
@@ -4898,6 +4857,9 @@ public:
     directory is traversed. The name of each iterated directory entry
     contains the absolute or relative _path (depending on _pathname).
 
+    Note: The order of returned directory entries is as it is provided by the
+    operating system / filesystem, and may not follow any particular sorting.
+
     Params:
         path = The directory to iterate over.
                If empty, the current directory will be iterated.
@@ -4981,7 +4943,7 @@ auto dirEntries(string path, SpanMode mode, bool followSymlink = true)
 
         return std.file.dirEntries(pathname, SpanMode.shallow)
             .filter!(a => a.isFile)
-            .map!(a => std.path.baseName(a.name))
+            .map!((return a) => std.path.baseName(a.name))
             .array;
     }
 
@@ -5024,7 +4986,7 @@ auto dirEntries(string path, SpanMode mode, bool followSymlink = true)
         auto len = enforce(walkLength(dirEntries(absolutePath(relpath), mode)));
         assert(walkLength(dirEntries(relpath, mode)) == len);
         assert(equal(
-                   map!(a => absolutePath(a.name))(dirEntries(relpath, mode)),
+                   map!((return a) => absolutePath(a.name))(dirEntries(relpath, mode)),
                    map!(a => a.name)(dirEntries(absolutePath(relpath), mode))));
         return len;
     }
@@ -5174,7 +5136,7 @@ auto dirEntries(string path, string pattern, SpanMode mode,
     foreach (file; files)
         write(file, "nothing");
 
-    auto result = dirEntries(dir, SpanMode.shallow).map!(a => a.name.normalize()).array();
+    auto result = dirEntries(dir, SpanMode.shallow).map!((return a) => a.name.normalize()).array();
     sort(result);
 
     assert(equal(files, result));
@@ -5268,9 +5230,20 @@ slurp(Types...)(string filename, scope const(char)[] format)
     assert(slurp!(int)(deleteme, "%d") == [10, 20]);
 }
 
-
 /**
 Returns the path to a directory for temporary files.
+On POSIX platforms, it searches through the following list of directories
+and returns the first one which is found to exist:
+$(OL
+    $(LI The directory given by the `TMPDIR` environment variable.)
+    $(LI The directory given by the `TEMP` environment variable.)
+    $(LI The directory given by the `TMP` environment variable.)
+    $(LI `/tmp/`)
+    $(LI `/var/tmp/`)
+    $(LI `/usr/tmp/`)
+)
+
+On all platforms, `tempDir` returns the current working directory on failure.
 
 The return value of the function is cached, so the procedures described
 below will only be performed the first time the function is called.  All
@@ -5301,6 +5274,21 @@ Returns:
 */
 string tempDir() @trusted
 {
+    // We must check that the end of a path is not a separator, before adding another
+    // If we don't we end up with https://issues.dlang.org/show_bug.cgi?id=22738
+    static string addSeparator(string input)
+    {
+        import std.path : dirSeparator;
+        import std.algorithm.searching : endsWith;
+
+        // It is very rare a directory path will reach this point with a directory separator at the end
+        // However on OSX this can happen, so we must verify lest we break user code i.e. https://github.com/dlang/dub/pull/2208
+        if (!input.endsWith(dirSeparator))
+            return input ~ dirSeparator;
+        else
+            return input;
+    }
+
     static string cache;
     if (cache is null)
     {
@@ -5320,7 +5308,7 @@ string tempDir() @trusted
             static string findExistingDir(T...)(lazy T alternatives)
             {
                 foreach (dir; alternatives)
-                    if (!dir.empty && exists(dir)) return dir;
+                    if (!dir.empty && exists(dir)) return addSeparator(dir);
                 return null;
             }
 
@@ -5333,7 +5321,10 @@ string tempDir() @trusted
         }
         else static assert(false, "Unsupported platform");
 
-        if (cache is null) cache = getcwd();
+        if (cache is null)
+        {
+            cache = addSeparator(getcwd());
+        }
     }
     return cache;
 }
@@ -5354,6 +5345,16 @@ string tempDir() @trusted
 
     myFile.write("hello");
     assert(myFile.readText == "hello");
+}
+
+@safe unittest
+{
+    import std.algorithm.searching : endsWith;
+    import std.path : dirSeparator;
+    assert(tempDir.endsWith(dirSeparator));
+
+    // https://issues.dlang.org/show_bug.cgi?id=22738
+    assert(!tempDir.endsWith(dirSeparator ~ dirSeparator));
 }
 
 /**

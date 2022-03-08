@@ -47,13 +47,13 @@ $(T2 findSkip,
         leaves `a` unchanged, whereas `findSkip(a, "c")` advances `a`
         to `"de"` and returns `true`.)
 $(T2 findSplit,
-        `findSplit("abcdefg", "de")` returns the three ranges `"abc"`,
+        `findSplit("abcdefg", "de")` returns a tuple of three ranges `"abc"`,
         `"de"`, and `"fg"`.)
 $(T2 findSplitAfter,
-        `findSplitAfter("abcdefg", "de")` returns the two ranges
-        `"abcde"` and `"fg"`.)
+`findSplitAfter("abcdefg", "de")` returns a tuple of two ranges `"abcde"`
+        and `"fg"`.)
 $(T2 findSplitBefore,
-        `findSplitBefore("abcdefg", "de")` returns the two ranges `"abc"`
+        `findSplitBefore("abcdefg", "de")` returns a tuple of two ranges `"abc"`
         and `"defg"`.)
 $(T2 minCount,
         `minCount([2, 1, 1, 4, 1])` returns `tuple(1, 3)`.)
@@ -122,7 +122,9 @@ template all(alias pred = "a")
     if (isInputRange!Range)
     {
         static assert(is(typeof(unaryFun!pred(range.front))),
-                "`" ~ pred.stringof[1..$-1] ~ "` isn't a unary predicate function for range.front");
+                "`" ~ (isSomeString!(typeof(pred))
+                    ? pred.stringof[1..$-1] : pred.stringof)
+                ~ "` isn't a unary predicate function for range.front");
         import std.functional : not;
 
         return find!(not!(unaryFun!pred))(range).empty;
@@ -636,7 +638,7 @@ Returns:
 */
 size_t count(alias pred = "a == b", Range, E)(Range haystack, E needle)
 if (isInputRange!Range && !isInfinite!Range &&
-    is(typeof(binaryFun!pred(haystack.front, needle)) : bool))
+    is(typeof(binaryFun!pred(haystack.front, needle))))
 {
     bool pred2(ElementType!Range a) { return binaryFun!pred(a, needle); }
     return count!pred2(haystack);
@@ -691,7 +693,7 @@ if (isInputRange!Range && !isInfinite!Range &&
 size_t count(alias pred = "a == b", R1, R2)(R1 haystack, R2 needle)
 if (isForwardRange!R1 && !isInfinite!R1 &&
     isForwardRange!R2 &&
-    is(typeof(binaryFun!pred(haystack.front, needle.front)) : bool))
+    is(typeof(binaryFun!pred(haystack.front, needle.front))))
 {
     assert(!needle.empty, "Cannot count occurrences of an empty range");
 
@@ -714,7 +716,7 @@ if (isForwardRange!R1 && !isInfinite!R1 &&
 /// Ditto
 size_t count(alias pred, R)(R haystack)
 if (isInputRange!R && !isInfinite!R &&
-    is(typeof(unaryFun!pred(haystack.front)) : bool))
+    is(typeof(unaryFun!pred(haystack.front))))
 {
     size_t result;
     alias T = ElementType!R; //For narrow strings forces dchar iteration
@@ -741,6 +743,12 @@ if (isInputRange!R && !isInfinite!R)
 @safe nothrow unittest
 {
     assert([1, 2, 3].count([2, 3]) == 1);
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=22582
+@safe unittest
+{
+    assert([1, 2, 3].count!"a & 1" == 2);
 }
 
 /++
@@ -1274,6 +1282,16 @@ if (isInputRange!R &&
     }}
 }
 
+@safe pure unittest
+{
+    //example from issue 19727
+    import std.path : asRelativePath;
+    string[] ext = ["abc", "def", "ghi"];
+    string path = "/foo/file.def";
+    assert(ext.any!(e => path.asRelativePath("/foo").endsWith(e)) == true);
+    assert(ext.any!(e => path.asRelativePath("/foo").startsWith(e)) == false);
+}
+
 private enum bool hasConstEmptyMember(T) = is(typeof(((const T* a) => (*a).empty)(null)) : bool);
 
 // Rebindable doesn't work with structs
@@ -1601,7 +1619,8 @@ if (isInputRange!InputRange &&
             {
                 if (!__ctfe && canSearchInCodeUnits!char(needle))
                 {
-                    static R trustedMemchr(ref R haystack, ref E needle) @trusted nothrow pure
+                    static inout(R) trustedMemchr(ref return scope inout(R) haystack,
+                                                  ref const scope E needle) @trusted nothrow pure
                     {
                         import core.stdc.string : memchr;
                         auto ptr = memchr(haystack.ptr, needle, haystack.length);
@@ -1665,7 +1684,7 @@ if (isInputRange!InputRange &&
         {
             import std.algorithm.comparison : max, min;
 
-            R findHelper(ref R haystack, ref E needle) @trusted nothrow pure
+            R findHelper(return scope ref R haystack, ref E needle) @trusted nothrow pure
             {
                 import core.stdc.string : memchr;
 
@@ -2629,6 +2648,7 @@ if (isForwardRange!(Range))
     }
     static if (!isInfinite!Range)
         return ahead;
+    assert(0);
 }
 
 ///
@@ -3560,6 +3580,8 @@ Params:
     r = range from which the minimal element will be selected
     seed = custom seed to use as initial element
 
+Precondition: If a seed is not given, `r` must not be empty.
+
 Returns: The minimal element of the passed-in range.
 
 Note:
@@ -3710,6 +3732,8 @@ Params:
     map = custom accessor for the comparison key
     r = range from which the maximum element will be selected
     seed = custom seed to use as initial element
+
+Precondition: If a seed is not given, `r` must not be empty.
 
 Returns: The maximal element of the passed-in range.
 

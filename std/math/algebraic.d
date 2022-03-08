@@ -130,29 +130,11 @@ real fabs(real x) @safe pure nothrow @nogc { return core.math.fabs(x); }
 
 ///ditto
 pragma(inline, true)
-double fabs(double d) @trusted pure nothrow @nogc
-{
-    version (LDC)
-        return core.math.fabs(d);
-    else
-    {
-        ulong tmp = *cast(ulong*)&d & 0x7FFF_FFFF_FFFF_FFFF;
-        return *cast(double*)&tmp;
-    }
-}
+double fabs(double x) @safe pure nothrow @nogc { return core.math.fabs(x); }
 
 ///ditto
 pragma(inline, true)
-float fabs(float f) @trusted pure nothrow @nogc
-{
-    version (LDC)
-        return core.math.fabs(f);
-    else
-    {
-        uint tmp = *cast(uint*)&f & 0x7FFF_FFFF;
-        return *cast(float*)&tmp;
-    }
-}
+float fabs(float x) @safe pure nothrow @nogc { return core.math.fabs(x); }
 
 ///
 @safe unittest
@@ -227,6 +209,7 @@ real sqrt(real x) @nogc @safe pure nothrow { return core.math.sqrt(x); }
 
 @safe unittest
 {
+    // https://issues.dlang.org/show_bug.cgi?id=5305
     float function(float) psqrtf = &sqrt;
     assert(psqrtf != null);
     double function(double) psqrtd = &sqrt;
@@ -612,6 +595,12 @@ if (isFloatingPoint!T1 && isFloatingPoint!T2)
     return r;
 }
 
+version (linux)             version = GenericPosixVersion;
+else version (FreeBSD)      version = GenericPosixVersion;
+else version (OpenBSD)      version = GenericPosixVersion;
+else version (Solaris)      version = GenericPosixVersion;
+else version (DragonFlyBSD) version = GenericPosixVersion;
+
 pragma(inline, true) // LDC
 private real polyImpl(real x, in real[] A) @trusted pure nothrow @nogc
 {
@@ -653,7 +642,7 @@ private real polyImpl(real x, in real[] A) @trusted pure nothrow @nogc
         return_ST:                              ;
             }
         }
-        else version (linux)
+        else version (GenericPosixVersion)
         {
             asm pure nothrow @nogc // assembler by W. Bright
             {
@@ -698,87 +687,6 @@ private real polyImpl(real x, in real[] A) @trusted pure nothrow @nogc
         L2:     fmul    ST,ST(1)                ; // r *= x
                 fld     real ptr -16[EDX]       ;
                 sub     EDX,16                  ; // deg--
-                faddp   ST(1),ST                ;
-                dec     ECX                     ;
-                jne     L2                      ;
-                fxch    ST(1)                   ; // ST1 = r, ST0 = x
-                fstp    ST(0)                   ; // dump x
-                align   4                       ;
-        return_ST:                              ;
-            }
-        }
-        else version (FreeBSD)
-        {
-            asm pure nothrow @nogc // assembler by W. Bright
-            {
-                // EDX = (A.length - 1) * real.sizeof
-                mov     ECX,A[EBP]              ; // ECX = A.length
-                dec     ECX                     ;
-                lea     EDX,[ECX*8]             ;
-                lea     EDX,[EDX][ECX*4]        ;
-                add     EDX,A+4[EBP]            ;
-                fld     real ptr [EDX]          ; // ST0 = coeff[ECX]
-                jecxz   return_ST               ;
-                fld     x[EBP]                  ; // ST0 = x
-                fxch    ST(1)                   ; // ST1 = x, ST0 = r
-                align   4                       ;
-        L2:     fmul    ST,ST(1)                ; // r *= x
-                fld     real ptr -12[EDX]       ;
-                sub     EDX,12                  ; // deg--
-                faddp   ST(1),ST                ;
-                dec     ECX                     ;
-                jne     L2                      ;
-                fxch    ST(1)                   ; // ST1 = r, ST0 = x
-                fstp    ST(0)                   ; // dump x
-                align   4                       ;
-        return_ST:                              ;
-            }
-        }
-        else version (Solaris)
-        {
-            asm pure nothrow @nogc // assembler by W. Bright
-            {
-                // EDX = (A.length - 1) * real.sizeof
-                mov     ECX,A[EBP]              ; // ECX = A.length
-                dec     ECX                     ;
-                lea     EDX,[ECX*8]             ;
-                lea     EDX,[EDX][ECX*4]        ;
-                add     EDX,A+4[EBP]            ;
-                fld     real ptr [EDX]          ; // ST0 = coeff[ECX]
-                jecxz   return_ST               ;
-                fld     x[EBP]                  ; // ST0 = x
-                fxch    ST(1)                   ; // ST1 = x, ST0 = r
-                align   4                       ;
-        L2:     fmul    ST,ST(1)                ; // r *= x
-                fld     real ptr -12[EDX]       ;
-                sub     EDX,12                  ; // deg--
-                faddp   ST(1),ST                ;
-                dec     ECX                     ;
-                jne     L2                      ;
-                fxch    ST(1)                   ; // ST1 = r, ST0 = x
-                fstp    ST(0)                   ; // dump x
-                align   4                       ;
-        return_ST:                              ;
-            }
-        }
-        else version (DragonFlyBSD)
-        {
-            asm pure nothrow @nogc // assembler by W. Bright
-            {
-                // EDX = (A.length - 1) * real.sizeof
-                mov     ECX,A[EBP]              ; // ECX = A.length
-                dec     ECX                     ;
-                lea     EDX,[ECX*8]             ;
-                lea     EDX,[EDX][ECX*4]        ;
-                add     EDX,A+4[EBP]            ;
-                fld     real ptr [EDX]          ; // ST0 = coeff[ECX]
-                jecxz   return_ST               ;
-                fld     x[EBP]                  ; // ST0 = x
-                fxch    ST(1)                   ; // ST1 = x, ST0 = r
-                align   4                       ;
-        L2:     fmul    ST,ST(1)                ; // r *= x
-                fld     real ptr -12[EDX]       ;
-                sub     EDX,12                  ; // deg--
                 faddp   ST(1),ST                ;
                 dec     ECX                     ;
                 jne     L2                      ;

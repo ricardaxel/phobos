@@ -19,7 +19,7 @@ module std.json;
 
 import std.array;
 import std.conv;
-import std.range.primitives;
+import std.range;
 import std.traits;
 
 ///
@@ -152,14 +152,14 @@ struct JSONValue
      * Throws: `JSONException` for read access if `type` is not
      * `JSONType.string`.
      */
-    @property string str() const pure @trusted
+    @property string str() const pure @trusted return scope
     {
         enforce!JSONException(type == JSONType.string,
                                 "JSONValue is not a string");
         return store.str;
     }
     /// ditto
-    @property string str(string v) pure nothrow @nogc @safe
+    @property string str(return scope string v) pure nothrow @nogc @trusted return // TODO make @safe
     {
         assign(v);
         return v;
@@ -275,14 +275,14 @@ struct JSONValue
        (*a)["hello"] = "world";  // segmentation fault
        ---
      */
-    @property ref inout(JSONValue[string]) object() inout pure @system
+    @property ref inout(JSONValue[string]) object() inout pure @system return
     {
         enforce!JSONException(type == JSONType.object,
                                 "JSONValue is not an object");
         return store.object;
     }
     /// ditto
-    @property JSONValue[string] object(JSONValue[string] v) pure nothrow @nogc @safe
+    @property JSONValue[string] object(return scope JSONValue[string] v) pure nothrow @nogc @trusted // TODO make @safe
     {
         assign(v);
         return v;
@@ -321,14 +321,14 @@ struct JSONValue
        (*a)[0] = "world";  // segmentation fault
        ---
      */
-    @property ref inout(JSONValue[]) array() inout pure @system
+    @property ref inout(JSONValue[]) array() return scope inout pure @system
     {
         enforce!JSONException(type == JSONType.array,
                                 "JSONValue is not an array");
         return store.array;
     }
     /// ditto
-    @property JSONValue[] array(JSONValue[] v) pure nothrow @nogc @safe
+    @property JSONValue[] array(return scope JSONValue[] v) pure nothrow @nogc @trusted scope // TODO make @safe
     {
         assign(v);
         return v;
@@ -542,7 +542,7 @@ struct JSONValue
         }
         else
         {
-            static assert(false, text(`unable to convert type "`, T.Stringof, `" to json`));
+            static assert(false, text(`unable to convert type "`, T.stringof, `" to json`));
         }
     }
 
@@ -635,7 +635,7 @@ struct JSONValue
      * Hash syntax for json objects.
      * Throws: `JSONException` if `type` is not `JSONType.object`.
      */
-    ref inout(JSONValue) opIndex(string k) inout pure @safe
+    ref inout(JSONValue) opIndex(return scope string k) inout pure @safe
     {
         auto o = this.objectNoRef;
         return *enforce!JSONException(k in o,
@@ -735,13 +735,13 @@ struct JSONValue
      * Tests wether a key can be found in an object.
      *
      * Returns:
-     *      when found, the `const(JSONValue)*` that matches to the key,
+     *      when found, the `inout(JSONValue)*` that matches to the key,
      *      otherwise `null`.
      *
      * Throws: `JSONException` if the right hand side argument `JSONType`
      * is not `object`.
      */
-    auto opBinaryRight(string op : "in")(string k) const @safe
+    inout(JSONValue)* opBinaryRight(string op : "in")(string k) inout @safe
     {
         return k in this.objectNoRef;
     }
@@ -750,6 +750,8 @@ struct JSONValue
     {
         JSONValue j = [ "language": "D", "author": "walter" ];
         string a = ("author" in j).str;
+        *("author" in j) = "Walter";
+        assert(j["author"].str == "Walter");
     }
 
     bool opEquals(const JSONValue rhs) const @nogc nothrow pure @safe
@@ -927,7 +929,7 @@ Params:
     options = enable decoding string representations of NaN/Inf as float values
 */
 JSONValue parseJSON(T)(T json, int maxDepth = -1, JSONOptions options = JSONOptions.none)
-if (isInputRange!T && !isInfinite!T && isSomeChar!(ElementEncodingType!T))
+if (isSomeFiniteCharInputRange!T)
 {
     import std.ascii : isDigit, isHexDigit, toUpper, toLower;
     import std.typecons : Nullable, Yes;
@@ -1435,7 +1437,7 @@ Params:
     options = enable decoding string representations of NaN/Inf as float values
 */
 JSONValue parseJSON(T)(T json, JSONOptions options)
-if (isInputRange!T && !isInfinite!T && isSomeChar!(ElementEncodingType!T))
+if (isSomeFiniteCharInputRange!T)
 {
     return parseJSON!T(json, -1, options);
 }

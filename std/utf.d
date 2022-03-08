@@ -41,6 +41,7 @@ $(TR $(TD Index) $(TD
 ))
 $(TR $(TD Validation) $(TD
     $(LREF isValidDchar)
+    $(LREF isValidCodepoint)
     $(LREF validate)
 ))
 $(TR $(TD Miscellaneous) $(TD
@@ -64,9 +65,9 @@ module std.utf;
 import std.exception : basicExceptionCtors;
 import core.exception : UnicodeException;
 import std.meta : AliasSeq;
-import std.range.primitives;
-import std.traits : isAutodecodableString, isPointer, isSomeChar,
-    isSomeString, isStaticArray, Unqual, isConvertibleToString;
+import std.range;
+import std.traits : isAutodecodableString, isConvertibleToString, isPointer,
+    isSomeChar, isSomeString, isStaticArray, Unqual;
 import std.typecons : Flag, Yes, No;
 
 
@@ -81,7 +82,7 @@ class UTFException : UnicodeException
     size_t  len;
 
     @safe pure nothrow @nogc
-    UTFException setSequence(scope uint[] data...)
+    UTFException setSequence(scope uint[] data...) return
     {
         assert(data.length <= 4);
 
@@ -306,6 +307,54 @@ pure nothrow @safe @nogc unittest
     });
 }
 
+/**
+Checks if a single character forms a valid code point.
+
+When standing alone, some characters are invalid code points. For
+example the `wchar` `0xD800` is a so called high surrogate, which can
+only be interpreted together with a low surrogate following it. As a
+standalone character it is considered invalid.
+
+See $(LINK2 http://www.unicode.org/versions/Unicode13.0.0/,
+Unicode Standard, D90, D91 and D92) for more details.
+
+Params:
+    c = character to test
+    Char = character type of `c`
+
+Returns:
+    `true`, if `c` forms a valid code point.
+ */
+bool isValidCodepoint(Char)(Char c)
+if (isSomeChar!Char)
+{
+    alias UChar = Unqual!Char;
+    static if (is(UChar == char))
+    {
+        return c <= 0x7F;
+    }
+    else static if (is(UChar == wchar))
+    {
+        return c <= 0xD7FF || c >= 0xE000;
+    }
+    else static if (is(UChar == dchar))
+    {
+        return isValidDchar(c);
+    }
+    else
+        static assert(false, "unknown character type: `" ~ Char.stringof ~ "`");
+}
+
+///
+@safe pure nothrow unittest
+{
+    assert( isValidCodepoint(cast(char) 0x40));
+    assert(!isValidCodepoint(cast(char) 0x80));
+    assert( isValidCodepoint(cast(wchar) 0x1234));
+    assert(!isValidCodepoint(cast(wchar) 0xD800));
+    assert( isValidCodepoint(cast(dchar) 0x0010FFFF));
+    assert(!isValidCodepoint(cast(dchar) 0x12345678));
+}
 
 /++
     Calculate the length of the UTF sequence starting at `index`
@@ -1119,7 +1168,7 @@ do
 
 /// ditto
 dchar decode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar, S)(
-auto ref S str, ref size_t index) @trusted pure
+auto ref scope S str, ref size_t index) @trusted pure
 if (isSomeString!S)
 in
 {
@@ -1225,7 +1274,7 @@ do
 
 /// ditto
 dchar decodeFront(UseReplacementDchar useReplacementDchar = No.useReplacementDchar, S)(
-ref S str, out size_t numCodeUnits) @trusted pure
+ref scope S str, out size_t numCodeUnits) @trusted pure
 if (isSomeString!S)
 in
 {
@@ -2492,14 +2541,12 @@ size_t encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
         `UTFException` if `c` is not a valid UTF code point.
   +/
 void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
-    ref char[] str, dchar c) @safe pure
+    ref scope char[] str, dchar c) @safe pure
 {
-    char[] r = str;
-
     if (c <= 0x7F)
     {
         assert(isValidDchar(c));
-        r ~= cast(char) c;
+        str ~= cast(char) c;
     }
     else
     {
@@ -2540,9 +2587,8 @@ void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
             c = _utfException!useReplacementDchar("Encoding an invalid code point in UTF-8", c);
             goto L3;
         }
-        r ~= buf[0 .. L];
+        str ~= buf[0 .. L];
     }
-    str = r;
 }
 
 ///
@@ -2617,10 +2663,8 @@ void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
 
 /// ditto
 void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
-    ref wchar[] str, dchar c) @safe pure
+    ref scope wchar[] str, dchar c) @safe pure
 {
-    wchar[] r = str;
-
     if (c <= 0xFFFF)
     {
         if (0xD800 <= c && c <= 0xDFFF)
@@ -2628,7 +2672,7 @@ void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
 
         assert(isValidDchar(c));
     L1:
-        r ~= cast(wchar) c;
+        str ~= cast(wchar) c;
     }
     else if (c <= 0x10FFFF)
     {
@@ -2637,7 +2681,7 @@ void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
         assert(isValidDchar(c));
         buf[0] = cast(wchar)((((c - 0x10000) >> 10) & 0x3FF) + 0xD800);
         buf[1] = cast(wchar)(((c - 0x10000) & 0x3FF) + 0xDC00);
-        r ~= buf;
+        str ~= buf;
     }
     else
     {
@@ -2645,8 +2689,6 @@ void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
         c = _utfException!useReplacementDchar("Encoding an invalid code point in UTF-16", c);
         goto L1;
     }
-
-    str = r;
 }
 
 @safe unittest
@@ -2678,7 +2720,7 @@ void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
 
 /// ditto
 void encode(UseReplacementDchar useReplacementDchar = No.useReplacementDchar)(
-    ref dchar[] str, dchar c) @safe pure
+    ref scope dchar[] str, dchar c) @safe pure
 {
     if ((0xD800 <= c && c <= 0xDFFF) || 0x10FFFF < c)
         c = _utfException!useReplacementDchar("Encoding an invalid code point in UTF-32", c);
@@ -2767,7 +2809,7 @@ if (isSomeChar!C)
         The number of code units in `input` when encoded to `C`
   +/
 size_t codeLength(C, InputRange)(InputRange input)
-if (isInputRange!InputRange && !isInfinite!InputRange && isSomeChar!(ElementType!InputRange))
+if (isSomeFiniteCharInputRange!InputRange)
 {
     alias EncType = Unqual!(ElementEncodingType!InputRange);
     static if (isSomeString!InputRange && is(EncType == C) && is(typeof(input.length)))
@@ -2919,7 +2961,7 @@ if (isSomeString!S)
  *     For a lazy, non-allocating version of these functions, see $(LREF byUTF).
  */
 string toUTF8(S)(S s)
-if (isInputRange!S && !isInfinite!S && isSomeChar!(ElementEncodingType!S))
+if (isSomeFiniteCharInputRange!S)
 {
     return toUTFImpl!string(s);
 }
@@ -2961,7 +3003,7 @@ if (isInputRange!S && !isInfinite!S && isSomeChar!(ElementEncodingType!S))
  *     For a lazy, non-allocating version of these functions, see $(LREF byUTF).
  */
 wstring toUTF16(S)(S s)
-if (isInputRange!S && !isInfinite!S && isSomeChar!(ElementEncodingType!S))
+if (isSomeFiniteCharInputRange!S)
 {
     return toUTFImpl!wstring(s);
 }
@@ -3004,8 +3046,8 @@ if (isInputRange!S && !isInfinite!S && isSomeChar!(ElementEncodingType!S))
  * See_Also:
  *     For a lazy, non-allocating version of these functions, see $(LREF byUTF).
  */
-dstring toUTF32(S)(S s)
-if (isInputRange!S && !isInfinite!S && isSomeChar!(ElementEncodingType!S))
+dstring toUTF32(S)(scope S s)
+if (isSomeFiniteCharInputRange!S)
 {
     return toUTFImpl!dstring(s);
 }
@@ -3023,7 +3065,7 @@ if (isInputRange!S && !isInfinite!S && isSomeChar!(ElementEncodingType!S))
     assert("𐐷"w.toUTF32.equal([0x00010437]));
 }
 
-private T toUTFImpl(T, S)(S s)
+private T toUTFImpl(T, S)(scope S s)
 {
     static if (is(S : T))
     {
@@ -3104,7 +3146,7 @@ if (isPointer!P && isSomeChar!(typeof(*P.init)))
     auto p6 = toUTFz!(immutable(dchar)*)("hello world"w);
 }
 
-private P toUTFzImpl(P, S)(S str) @safe pure
+private P toUTFzImpl(P, S)(return scope S str) @safe pure
 if (is(immutable typeof(*P.init) == typeof(str[0])))
 //immutable(C)[] -> C*, const(C)*, or immutable(C)*
 {
@@ -3147,7 +3189,7 @@ if (is(immutable typeof(*P.init) == typeof(str[0])))
     }
 }
 
-private P toUTFzImpl(P, S)(S str) @safe pure
+private P toUTFzImpl(P, S)(return scope S str) @safe pure
 if (is(typeof(str[0]) C) && is(immutable typeof(*P.init) == immutable C) && !is(C == immutable))
 //C[] or const(C)[] -> C*, const(C)*, or immutable(C)*
 {
@@ -4229,9 +4271,10 @@ private int impureVariable;
  *      Does not use GC if `useReplacementDchar` is set to `UseReplacementDchar.no`
  *
  * Returns:
- *      A forward range if `R` is a range and not auto-decodable, as defined by
- *      $(REF isAutodecodableString, std, traits), and if the base range is
- *      also a forward range.
+ *      A bidirectional range if `R` is a bidirectional range and not auto-decodable,
+ *      as defined by $(REF isAutodecodableString, std, traits).
+ *
+ *      A forward range if `R` is a forward range and not auto-decodable.
  *
  *      Or, if `R` is a range and it is auto-decodable and
  *      `is(ElementEncodingType!typeof(r) == C)`, then the range is passed
@@ -4265,21 +4308,33 @@ if (isSomeChar!C)
             {
                 enum Empty = uint.max;  // range is empty or just constructed
 
-                this(return R r)
+                this(return scope R r)
                 {
                     this.r = r;
                 }
 
-                this(return R r, uint buff)
+                this(return scope R r, uint buff)
                 {
                     this.r = r;
                     this.buff = buff;
                 }
 
+                static if (isBidirectionalRange!R)
+                {
+                    this(return scope R r, uint frontBuff, uint backBuff)
+                    {
+                        this.r = r;
+                        this.buff = frontBuff;
+                        this.backBuff = backBuff;
+                    }
+                }
 
                 @property bool empty()
                 {
-                    return buff == Empty && r.empty;
+                    static if (isBidirectionalRange!R)
+                        return buff == Empty && backBuff == Empty && r.empty;
+                    else
+                        return buff == Empty && r.empty;
                 }
 
                 @property dchar front() scope // 'scope' required by call to decodeFront() below
@@ -4316,7 +4371,47 @@ if (isSomeChar!C)
                 {
                     @property auto save()
                     {
-                        return Result(r.save, buff);
+                        static if (isBidirectionalRange!R)
+                        {
+                            return Result(r.save, buff, backBuff);
+                        }
+                        else
+                        {
+                            return Result(r.save, buff);
+                        }
+                    }
+                }
+
+                static if (isBidirectionalRange!R)
+                {
+                    @property dchar back() scope // 'scope' required by call to decodeBack() below
+                    {
+                        if (backBuff != Empty)
+                            return cast(dchar) backBuff;
+
+                        auto c = r.back;
+                        static if (is(RC == wchar))
+                            enum firstMulti = 0xD800; // First high surrogate.
+                        else
+                            enum firstMulti = 0x80; // First non-ASCII.
+                        if (c < firstMulti)
+                        {
+                            r.popBack;
+                            backBuff = cast(dchar) c;
+                        }
+                        else
+                        {
+                            backBuff = () @trusted { return decodeBack!useReplacementDchar(r); }();
+                        }
+                        return cast(dchar) backBuff;
+
+                    }
+
+                    void popBack()
+                    {
+                        if (backBuff == Empty)
+                            back();
+                        backBuff = Empty;
                     }
                 }
 
@@ -4324,6 +4419,8 @@ if (isSomeChar!C)
 
                 R r;
                 uint buff = Empty;      // one character lookahead buffer
+                static if (isBidirectionalRange!R)
+                    uint backBuff = Empty;
             }
 
             return Result(r);
@@ -4332,12 +4429,12 @@ if (isSomeChar!C)
         {
             static struct Result
             {
-                this(return R r)
+                this(return scope R r)
                 {
                     this.r = r;
                 }
 
-                this(return R r, ushort pos, ushort fill, C[4 / C.sizeof] buf)
+                this(return scope R r, ushort pos, ushort fill, C[4 / C.sizeof] buf)
                 {
                     this.r = r;
                     this.pos = pos;
@@ -4345,9 +4442,26 @@ if (isSomeChar!C)
                     this.buf = buf;
                 }
 
+                static if (isBidirectionalRange!R)
+                {
+                    this(return scope R r, ushort frontPos, ushort frontFill,
+                         ushort backPos, ushort backFill, C[4 / C.sizeof] buf)
+                    {
+                        this.r = r;
+                        this.pos = frontPos;
+                        this.fill = frontFill;
+                        this.backPos = backPos;
+                        this.backFill = backFill;
+                        this.buf = buf;
+                    }
+                }
+
                 @property bool empty()
                 {
-                    return pos == fill && r.empty;
+                    static if (isBidirectionalRange!R)
+                        return pos == fill && backPos == backFill && r.empty;
+                    else
+                        return pos == fill && r.empty;
                 }
 
                 @property auto front() scope // 'scope' required by call to decodeFront() below
@@ -4393,7 +4507,55 @@ if (isSomeChar!C)
                 {
                     @property auto save()
                     {
-                        return Result(r.save, pos, fill, buf);
+                        static if (isBidirectionalRange!R)
+                        {
+                            return Result(r.save, pos, fill, backPos, backFill, buf);
+                        }
+                        else
+                        {
+                            return Result(r.save, pos, fill, buf);
+                        }
+                    }
+                }
+
+                static if (isBidirectionalRange!R)
+                {
+                    @property auto back() scope // 'scope' required by call to decodeBack() below
+                    {
+                        if (backPos != backFill)
+                            return buf[cast(ushort) (backFill - backPos - 1)];
+
+                        backPos = 0;
+                        auto c = r.back;
+                        static if (C.sizeof >= 2 && RC.sizeof >= 2)
+                            enum firstMulti = 0xD800; // First high surrogate.
+                        else
+                            enum firstMulti = 0x80; // First non-ASCII.
+                        if (c < firstMulti)
+                        {
+                            backFill = 1;
+                            r.popBack;
+                            buf[cast(ushort) (backFill - backPos - 1)] = cast(C) c;
+                        }
+                        else
+                        {
+                            static if (is(RC == dchar))
+                            {
+                                r.popBack;
+                                dchar dc = c;
+                            }
+                            else
+                                dchar dc = () @trusted { return decodeBack!(useReplacementDchar)(r); }();
+                            backFill = cast(ushort) encode!(useReplacementDchar)(buf, dc);
+                        }
+                        return buf[cast(ushort) (backFill - backPos - 1)];
+                    }
+
+                    void popBack()
+                    {
+                        if (backPos == backFill)
+                            back;
+                        ++backPos;
                     }
                 }
 
@@ -4401,6 +4563,8 @@ if (isSomeChar!C)
 
                 R r;
                 ushort pos, fill;
+                static if (isBidirectionalRange!R)
+                    ushort backPos, backFill;
                 C[4 / C.sizeof] buf = void;
             }
 
@@ -4434,4 +4598,121 @@ if (isSomeChar!C)
 
     assert("hello\xF0betty".byChar.byUTF!(dchar, UseReplacementDchar.yes).equal("hello\uFFFDetty"));
     assertThrown!UTFException("hello\xF0betty".byChar.byUTF!(dchar, UseReplacementDchar.no).equal("hello betty"));
+}
+
+@safe unittest
+{
+    {
+        wchar[] s = ['a', 'b', 0x219];
+        auto r = s.byUTF!char;
+        assert(isBidirectionalRange!(typeof(r)));
+        assert(r.back == 0x99);
+        r.popBack;
+        assert(r.back == 0xc8);
+        r.popBack;
+        assert(r.back == 'b');
+
+    }
+
+    {
+        wchar[] s = ['a', 'b', 0x219];
+        auto r = s.byUTF!wchar;
+        uint i;
+        assert(isBidirectionalRange!(typeof(r)));
+        assert(r.back == 0x219);
+        r.popBack;
+        assert(r.back == 'b');
+    }
+
+    {
+        wchar[] s = ['a', 'b', 0x219];
+        auto r = s.byUTF!dchar;
+        assert(isBidirectionalRange!(typeof(r)));
+        assert(r.back == 0x219);
+        r.popBack;
+        assert(r.back == 'b');
+    }
+
+    {
+        dchar[] s = ['𐐷', '😁'];
+        auto r = s.byUTF!wchar;
+        assert(r.back == 0xde01);
+        r.popBack;
+        assert(r.back == 0xd83d);
+        r.popBack;
+        assert(r.back == 0xdc37);
+        r.popBack;
+        assert(r.back == 0xd801);
+    }
+
+    {
+        dchar[] s = ['𐐷', '😁'];
+        auto r = s.byUTF!char;
+        char[] res;
+        while (!r.empty)
+        {
+            res ~= r.back;
+            r.popBack;
+        }
+        import std.algorithm.comparison : equal;
+        assert(res.equal([0x81, 0x98, 0x9f, 0xf0, 0xb7, 0x90, 0x90, 0xf0]));
+    }
+
+    {
+        dchar[] res;
+        auto r = ['a', 'b', 'c', 'd', 'e'].byUTF!dchar;
+        while (!r.empty)
+        {
+            res ~= r.back;
+            r.popBack;
+        }
+        import std.algorithm.comparison : equal;
+        assert(res.equal(['e', 'd', 'c', 'b', 'a']));
+    }
+
+    {
+        //testing the save() function
+        wchar[] s = ['Ă','ț'];
+
+        auto rc = s.byUTF!char;
+        rc.popBack;
+        auto rcCopy = rc.save;
+        assert(rc.back == rcCopy.back);
+        assert(rcCopy.back == 0xc8);
+
+        auto rd = s.byUTF!dchar;
+        rd.popBack;
+        auto rdCopy = rd.save;
+        assert(rd.back == rdCopy.back);
+        assert(rdCopy.back == 'Ă');
+    }
+}
+
+///
+@safe pure nothrow unittest
+{
+    import std.range.primitives;
+    wchar[] s = ['ă', 'î'];
+
+    auto rc = s.byUTF!char;
+    static assert(isBidirectionalRange!(typeof(rc)));
+    assert(rc.back == 0xae);
+    rc.popBack;
+    assert(rc.back == 0xc3);
+    rc.popBack;
+    assert(rc.back == 0x83);
+    rc.popBack;
+    assert(rc.back == 0xc4);
+
+    auto rw = s.byUTF!wchar;
+    static assert(isBidirectionalRange!(typeof(rw)));
+    assert(rw.back == 'î');
+    rw.popBack;
+    assert(rw.back == 'ă');
+
+    auto rd = s.byUTF!dchar;
+    static assert(isBidirectionalRange!(typeof(rd)));
+    assert(rd.back == 'î');
+    rd.popBack;
+    assert(rd.back == 'ă');
 }

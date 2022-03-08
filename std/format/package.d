@@ -179,10 +179,10 @@ $(BOOKTABLE ,
              Depending on the number, a scientific notation or
              a natural notation is used.))
    $(TR $(TD $(B 'a') / $(B 'A'))
-        $(TD To be formatted as a real number in hexadezimal scientific notation.))
+        $(TD To be formatted as a real number in hexadecimal scientific notation.))
    $(TR $(TD $(B 'r'))
         $(TD To be formatted as raw bytes.
-             The output may not be printable and depends on endianess.))
+             The output may not be printable and depends on endianness.))
 )
 
 The $(I compound indicator) can be used to describe compound types
@@ -732,7 +732,7 @@ if (isInputRange!Range)
 }
 
 // Used to check format strings are compatible with argument types
-package(std) static const checkFormatException(alias fmt, Args...) =
+package(std) enum checkFormatException(alias fmt, Args...) =
 {
     import std.conv : text;
 
@@ -743,7 +743,7 @@ package(std) static const checkFormatException(alias fmt, Args...) =
         enforceFmt(n == Args.length, text("Orphan format arguments: args[", n, "..", Args.length, "]"));
     }
     catch (Exception e)
-        return e;
+        return e.msg;
     return null;
 }();
 
@@ -1367,7 +1367,7 @@ if (isSomeString!(typeof(fmt)))
     alias e = checkFormatException!(fmt, Args);
     alias Char = Unqual!(ElementEncodingType!(typeof(fmt)));
 
-    static assert(!e, e.msg);
+    static assert(!e, e);
     auto w = appender!(immutable(Char)[]);
 
     // no need to traverse the string twice during compile time

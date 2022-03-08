@@ -28,7 +28,7 @@ struct Mallocator
     programs that can afford to leak memory allocated.
     */
     @trusted @nogc nothrow pure
-    void[] allocate(size_t bytes) shared
+    void[] allocate(size_t bytes) shared const
     {
         import core.memory : pureMalloc;
         if (!bytes) return null;
@@ -38,7 +38,7 @@ struct Mallocator
 
     /// Ditto
     @system @nogc nothrow pure
-    bool deallocate(void[] b) shared
+    bool deallocate(void[] b) shared const
     {
         import core.memory : pureFree;
         pureFree(b.ptr);
@@ -47,7 +47,7 @@ struct Mallocator
 
     /// Ditto
     @system @nogc nothrow pure
-    bool reallocate(ref void[] b, size_t s) shared
+    bool reallocate(ref void[] b, size_t s) shared const
     {
         import core.memory : pureRealloc;
         if (!s)
@@ -65,7 +65,7 @@ struct Mallocator
     }
 
     @trusted @nogc nothrow pure
-    package void[] allocateZeroed()(size_t bytes) shared
+    package void[] allocateZeroed()(size_t bytes) shared const
     {
         import core.memory : pureCalloc;
         if (!bytes) return null;
@@ -392,6 +392,7 @@ version (Posix)
     AlignedMallocator.instance.alignedReallocate(c, 32, 32);
     assert(c.ptr);
 
+    version (LDC_AddressSanitizer) {} else // AddressSanitizer does not support such large memory allocations (0x10000000000 max)
     version (DragonFlyBSD) {} else    /* FIXME: Malloc on DragonFly does not return NULL when allocating more than UINTPTR_MAX
                                        * $(LINK: https://bugs.dragonflybsd.org/issues/3114, dragonfly bug report)
                                        * $(LINK: https://github.com/dlang/druntime/pull/1999#discussion_r157536030, PR Discussion) */

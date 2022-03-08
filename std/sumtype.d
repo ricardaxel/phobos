@@ -262,6 +262,8 @@ private enum isHashable(T) = __traits(compiles,
 
 private enum hasPostblit(T) = __traits(hasPostblit, T);
 
+private enum isInout(T) = is(T == inout);
+
 /**
  * A [tagged union](https://en.wikipedia.org/wiki/Tagged_union) that can hold a
  * single value from any of a specified set of types.
@@ -365,62 +367,27 @@ public:
         {
             import core.lifetime : forward;
 
-            storage = ()
+            static if (isCopyable!T)
             {
-                static if (isCopyable!T)
-                {
-                    mixin("Storage newStorage = { ",
-                        // Workaround for https://issues.dlang.org/show_bug.cgi?id=21542
-                        Storage.memberName!T, ": (__ctfe ? value : forward!value)",
-                    " };");
-                }
-                else
-                {
-                    mixin("Storage newStorage = { ",
-                        Storage.memberName!T, " : forward!value",
-                    " };");
-                }
-
-                return newStorage;
-            }();
+                // Workaround for https://issues.dlang.org/show_bug.cgi?id=21542
+                __traits(getMember, storage, Storage.memberName!T) = __ctfe ? value : forward!value;
+            }
+            else
+            {
+                __traits(getMember, storage, Storage.memberName!T) = forward!value;
+            }
 
             tag = tid;
         }
 
-        static if (isCopyable!T)
+        static if (isCopyable!(const(T)))
         {
             static if (IndexOf!(const(T), Map!(ConstOf, Types)) == tid)
             {
                 /// ditto
                 this(const(T) value) const
                 {
-                    storage = ()
-                    {
-                        mixin("const(Storage) newStorage = { ",
-                            Storage.memberName!T, ": value",
-                        " };");
-
-                        return newStorage;
-                    }();
-
-                    tag = tid;
-                }
-            }
-
-            static if (IndexOf!(immutable(T), Map!(ImmutableOf, Types)) == tid)
-            {
-                /// ditto
-                this(immutable(T) value) immutable
-                {
-                    storage = ()
-                    {
-                        mixin("immutable(Storage) newStorage = { ",
-                            Storage.memberName!T, ": value",
-                        " };");
-
-                        return newStorage;
-                    }();
-
+                    __traits(getMember, storage, Storage.memberName!T) = value;
                     tag = tid;
                 }
             }
@@ -428,6 +395,22 @@ public:
         else
         {
             @disable this(const(T) value) const;
+        }
+
+        static if (isCopyable!(immutable(T)))
+        {
+            static if (IndexOf!(immutable(T), Map!(ImmutableOf, Types)) == tid)
+            {
+                /// ditto
+                this(immutable(T) value) immutable
+                {
+                    __traits(getMember, storage, Storage.memberName!T) = value;
+                    tag = tid;
+                }
+            }
+        }
+        else
+        {
             @disable this(immutable(T) value) immutable;
         }
     }
@@ -438,6 +421,7 @@ public:
         (
             allSatisfy!(isCopyable, Map!(InoutOf, Types))
             && !anySatisfy!(hasPostblit, Map!(InoutOf, Types))
+            && allSatisfy!(isInout, Map!(InoutOf, Types))
         )
         {
             /// Constructs a `SumType` that's a copy of another `SumType`.
@@ -569,26 +553,27 @@ public:
             /**
              * Assigns a value to a `SumType`.
              *
-             * Assigning to a `SumType` is `@system` if any of the
-             * `SumType`'s members contain pointers or references, since
-             * those members may be reachable through external references,
-             * and overwriting them could therefore lead to memory
-             * corruption.
+             * Assigning to a `SumType` is `@system` if any of the `SumType`'s
+             * $(I other) members contain pointers or references, since those
+             * members may be reachable through external references, and
+             * overwriting them could therefore lead to memory corruption.
              *
              * An individual assignment can be `@trusted` if the caller can
-             * guarantee that there are no outstanding references to $(I any)
-             * of the `SumType`'s members when the assignment occurs.
+             * guarantee that, when the assignment occurs, there are no
+             * outstanding references to any such members.
              */
             ref SumType opAssign(T rhs)
             {
                 import core.lifetime : forward;
                 import std.traits : hasIndirections, hasNested;
-                import std.meta : Or = templateOr;
+                import std.meta : AliasSeq, Or = templateOr;
 
-                enum mayContainPointers =
-                    anySatisfy!(Or!(hasIndirections, hasNested), Types);
+                alias OtherTypes =
+                    AliasSeq!(Types[0 .. tid], Types[tid + 1 .. $]);
+                enum unsafeToOverwrite =
+                    anySatisfy!(Or!(hasIndirections, hasNested), OtherTypes);
 
-                static if (mayContainPointers)
+                static if (unsafeToOverwrite)
                 {
                     cast(void) () @system {}();
                 }
@@ -993,6 +978,7 @@ version (D_BetterC) {} else
 }
 
 // const SumTypes
+version (D_BetterC) {} else // not @nogc, https://issues.dlang.org/show_bug.cgi?id=22117
 @safe unittest
 {
     auto _ = const(SumType!(int[]))([1, 2, 3]);
@@ -1418,6 +1404,27 @@ version (D_BetterC) {} else
     Outer y = x;
 }
 
+// Types with qualified copy constructors
+@safe unittest
+{
+    static struct ConstCopy
+    {
+        int n;
+        this(inout int n) inout { this.n = n; }
+        this(ref const typeof(this) other) const { this.n = other.n; }
+    }
+
+    static struct ImmutableCopy
+    {
+        int n;
+        this(inout int n) inout { this.n = n; }
+        this(ref immutable typeof(this) other) immutable { this.n = other.n; }
+    }
+
+    const SumType!ConstCopy x = const(ConstCopy)(1);
+    immutable SumType!ImmutableCopy y = immutable(ImmutableCopy)(1);
+}
+
 // Types with disabled opEquals
 @safe unittest
 {
@@ -1467,6 +1474,42 @@ version (D_BetterC) {} else
 
     MySum x = b;
     MySum y; y = b;
+}
+
+// @safe assignment to the only pointer type in a SumType
+@safe unittest
+{
+    SumType!(string, int) sm = 123;
+    sm = "this should be @safe";
+}
+
+// Pointers to local variables
+// https://issues.dlang.org/show_bug.cgi?id=22117
+@safe unittest
+{
+    int n = 123;
+    immutable int ni = 456;
+
+    SumType!(int*) s = &n;
+    const SumType!(int*) sc = &n;
+    immutable SumType!(int*) si = &ni;
+}
+
+// Immutable member type with copy constructor
+// https://issues.dlang.org/show_bug.cgi?id=22572
+@safe unittest
+{
+    static struct CopyConstruct
+    {
+        this(ref inout CopyConstruct other) inout {}
+    }
+
+    static immutable struct Value
+    {
+        CopyConstruct c;
+    }
+
+    SumType!Value s;
 }
 
 /// True if `T` is an instance of the `SumType` template, otherwise false.
@@ -1677,7 +1720,6 @@ template match(handlers...)
  * Throws:
  *   [MatchException], if the currently-held type has no matching handler.
  *
- * See_Also: `std.variant.tryVisit`
  * See_Also: $(REF tryVisit, std,variant)
  */
 version (D_Exceptions)

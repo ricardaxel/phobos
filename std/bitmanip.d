@@ -1447,7 +1447,8 @@ public:
             size_t bitCount;
             foreach (i; 0 .. fullWords)
                 bitCount += countBitsSet(_ptr[i]);
-            bitCount += countBitsSet(_ptr[fullWords] & endMask);
+            if (endBits)
+                bitCount += countBitsSet(_ptr[fullWords] & endMask);
             return bitCount;
         }
         else
@@ -1598,7 +1599,7 @@ public:
     /**********************************************
      * Reverses the bits of the `BitArray`.
      */
-    @property BitArray reverse() @nogc pure nothrow
+    @property BitArray reverse() @nogc pure nothrow return
     out (result)
     {
         assert(result == this, "the result must be equal to this");
@@ -1638,7 +1639,7 @@ public:
     /**********************************************
      * Sorts the `BitArray`'s elements.
      */
-    @property BitArray sort() @nogc pure nothrow
+    @property BitArray sort() @nogc pure nothrow return
     out (result)
     {
         assert(result == this, "the result must be equal to this");
@@ -2063,7 +2064,7 @@ public:
     /***************************************
      * Support for operator op= for `BitArray`.
      */
-    BitArray opOpAssign(string op)(const BitArray e2) @nogc pure nothrow
+    BitArray opOpAssign(string op)(const BitArray e2) @nogc pure nothrow return scope
         if (op == "-" || op == "&" || op == "|" || op == "^")
     in
     {
@@ -2184,7 +2185,7 @@ public:
      * shared between BitArray objects. i.e. D dynamic array
      * concatenation semantics are not followed)
      */
-    BitArray opOpAssign(string op)(bool b) pure nothrow
+    BitArray opOpAssign(string op)(bool b) pure nothrow return scope
         if (op == "~")
     {
         length = _len + 1;
@@ -2214,7 +2215,7 @@ public:
     /***************************************
      * ditto
      */
-    BitArray opOpAssign(string op)(BitArray b) pure nothrow
+    BitArray opOpAssign(string op)(BitArray b) pure nothrow return scope
         if (op == "~")
     {
         auto istart = _len;
@@ -2844,6 +2845,19 @@ public:
     assert(format("%b", b) == "1_00001111_00001111");
 }
 
+@system unittest
+{
+    BitArray a;
+    a.length = 5;
+    foreach (ref bool b; a)
+    {
+        assert(b == 0);
+        b = 1;
+    }
+    foreach (bool b; a)
+        assert(b == 1);
+}
+
 /++
     Swaps the endianness of the given integral value or character.
   +/
@@ -2935,12 +2949,12 @@ if (isIntegral!T || isSomeChar!T || isBoolean!T)
 private union EndianSwapper(T)
 if (canSwapEndianness!T)
 {
-    Unqual!T value;
+    T value;
     ubyte[T.sizeof] array;
 
-    static if (is(FloatingPointTypeOf!(Unqual!T) == float))
+    static if (is(immutable FloatingPointTypeOf!(T) == immutable float))
         uint  intValue;
-    else static if (is(FloatingPointTypeOf!(Unqual!T) == double))
+    else static if (is(immutable FloatingPointTypeOf!(T) == immutable double))
         ulong intValue;
 
 }

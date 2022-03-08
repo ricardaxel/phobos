@@ -710,3 +710,25 @@ T unformatValue(T, Range, Char)(ref Range input, scope const ref FormatSpec!Char
     assert(result[0] == 'a');
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=20393
+@safe pure unittest
+{
+    import std.exception : assertThrown;
+    string str = "foo 12a-buzz";
+    string a, c;
+    int b;
+    assertThrown(formattedRead(str, "%s %d-%s", &a, &b, &c));
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=18051
+@safe pure unittest
+{
+    import std.format : format;
+
+    enum Op { lt, gt, eq }
+
+    auto s = format!"%s"(Op.lt);
+    Op op;
+    assert(formattedRead!"%s"(s, op) == 1);
+    assert(op == Op.lt);
+}

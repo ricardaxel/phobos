@@ -50,8 +50,8 @@ import core.stdc.stddef : wchar_t;
 public import core.stdc.stdio;
 import std.algorithm.mutation : copy;
 import std.meta : allSatisfy;
-import std.range.primitives : ElementEncodingType, empty, front,
-    isBidirectionalRange, isInputRange, put;
+import std.range : ElementEncodingType, empty, front, isBidirectionalRange,
+    isInputRange, isSomeFiniteCharInputRange, put;
 import std.traits : isSomeChar, isSomeString, Unqual, isPointer;
 import std.typecons : Flag, No, Yes;
 
@@ -373,17 +373,14 @@ else version (GENERIC_IO)
     nothrow:
     @nogc:
 
-    private int _FPUTC(int c, _iobuf* fp) { return fputc(c, cast(shared) fp); }
-    private int _FPUTWC(wchar_t c, _iobuf* fp)
+    extern (C) private
     {
-        import core.stdc.wchar_ : fputwc;
-        return fputwc(c, cast(shared) fp);
-    }
-    private int _FGETC(_iobuf* fp) { return fgetc(cast(shared) fp); }
-    private int _FGETWC(_iobuf* fp)
-    {
-        import core.stdc.wchar_ : fgetwc;
-        return fgetwc(cast(shared) fp);
+        static import core.stdc.wchar_;
+
+        pragma(mangle, fputc.mangleof) int _FPUTC(int c, _iobuf* fp);
+        pragma(mangle, core.stdc.wchar_.fputwc.mangleof) int _FPUTWC(wchar_t c, _iobuf* fp);
+        pragma(mangle, fgetc.mangleof) int _FGETC(_iobuf* fp);
+        pragma(mangle, core.stdc.wchar_.fgetwc.mangleof) int _FGETWC(_iobuf* fp);
     }
 
     version (Posix)
@@ -399,27 +396,19 @@ else version (GENERIC_IO)
     // @@@DEPRECATED_2.107@@@
     deprecated("internal function fputc_unlocked was unintentionally available "
                ~ "from std.stdio and will be removed afer 2.107")
-    int fputc_unlocked(int c, _iobuf* fp) { return fputc(c, cast(shared) fp); }
+    extern (C) pragma(mangle, fputc.mangleof) int fputc_unlocked(int c, _iobuf* fp);
     // @@@DEPRECATED_2.107@@@
     deprecated("internal function fputwc_unlocked was unintentionally available "
                ~ "from std.stdio and will be removed afer 2.107")
-    int fputwc_unlocked(wchar_t c, _iobuf* fp)
-    {
-        import core.stdc.wchar_ : fputwc;
-        return fputwc(c, cast(shared) fp);
-    }
+    extern (C) pragma(mangle, core.stdc.wchar_.fputwc.mangleof) int fputwc_unlocked(wchar_t c, _iobuf* fp);
     // @@@DEPRECATED_2.107@@@
     deprecated("internal function fgetc_unlocked was unintentionally available "
                ~ "from std.stdio and will be removed afer 2.107")
-    int fgetc_unlocked(_iobuf* fp) { return fgetc(cast(shared) fp); }
+    extern (C) pragma(mangle, fgetc.mangleof) int fgetc_unlocked(_iobuf* fp);
     // @@@DEPRECATED_2.107@@@
     deprecated("internal function fgetwc_unlocked was unintentionally available "
                ~ "from std.stdio and will be removed afer 2.107")
-    int fgetwc_unlocked(_iobuf* fp)
-    {
-        import core.stdc.wchar_ : fgetwc;
-        return fgetwc(cast(shared) fp);
-    }
+    extern (C) pragma(mangle, core.stdc.wchar_.fgetwc.mangleof) int fgetwc_unlocked(_iobuf* fp);
 
     // @@@DEPRECATED_2.107@@@
     deprecated("internal alias FPUTC was unintentionally available from "
@@ -453,6 +442,16 @@ else version (GENERIC_IO)
 else
 {
     static assert(0, "unsupported C I/O system");
+}
+
+private extern (C) @nogc nothrow
+{
+    pragma(mangle, _FPUTC.mangleof) int trustedFPUTC(int ch, _iobuf* h) @trusted;
+
+    version (DIGITAL_MARS_STDIO)
+        pragma(mangle, _FPUTWC.mangleof) int trustedFPUTWC(int ch, _iobuf* h) @trusted;
+    else
+        pragma(mangle, _FPUTWC.mangleof) int trustedFPUTWC(wchar_t ch, _iobuf* h) @trusted;
 }
 
 static if (__traits(compiles, core.sys.posix.stdio.getdelim))
@@ -648,7 +647,7 @@ Throws: `ErrnoException` if the file could not be opened.
 
     /// ditto
     this(R1, R2)(R1 name)
-        if (isInputRange!R1 && isSomeChar!(ElementEncodingType!R1))
+        if (isSomeFiniteCharInputRange!R1)
     {
         import std.conv : to;
         this(name.to!string, "rb");
@@ -656,8 +655,8 @@ Throws: `ErrnoException` if the file could not be opened.
 
     /// ditto
     this(R1, R2)(R1 name, R2 mode)
-        if (isInputRange!R1 && isSomeChar!(ElementEncodingType!R1) &&
-            isInputRange!R2 && isSomeChar!(ElementEncodingType!R2))
+        if (isSomeFiniteCharInputRange!R1 &&
+            isSomeFiniteCharInputRange!R2)
     {
         import std.conv : to;
         this(name.to!string, mode.to!string);
@@ -1044,13 +1043,13 @@ Throws: `Exception` if the file is not opened.
 
  Returns: The name last used to initialize this this file, or `null` otherwise.
  */
-    @property string name() const @safe pure nothrow
+    @property string name() const @safe pure nothrow return
     {
         return _name;
     }
 
 /**
-If the file is not opened, returns `true`. Otherwise, returns
+If the file is closed or not yet opened, returns `true`. Otherwise, returns
 $(HTTP cplusplus.com/reference/clibrary/cstdio/ferror.html, ferror) for
 the file handle.
  */
@@ -1106,8 +1105,8 @@ Throws: `ErrnoException` on failure if closing the file.
     }
 
 /**
-If the file was unopened, succeeds vacuously. Otherwise closes the
-file (by calling $(HTTP
+If the file was closed or not yet opened, succeeds vacuously. Otherwise
+closes the file (by calling $(HTTP
 cplusplus.com/reference/clibrary/cstdio/fclose.html, fclose)),
 throwing on error. Even if an exception is thrown, afterwards the $(D
 File) object is empty. This is different from `detach` in that it
@@ -1135,7 +1134,7 @@ Throws: `ErrnoException` on error.
     }
 
 /**
-If the file is not opened, succeeds vacuously. Otherwise, returns
+If the file is closed or not yet opened, succeeds vacuously. Otherwise, returns
 $(HTTP cplusplus.com/reference/clibrary/cstdio/_clearerr.html,
 _clearerr) for the file handle.
  */
@@ -1741,14 +1740,13 @@ Removes the lock over the specified file segment.
         // the same process. fork() is used to create a second process.
         static void runForked(void delegate() code)
         {
-            import core.stdc.stdlib : exit;
             import core.sys.posix.sys.wait : waitpid;
-            import core.sys.posix.unistd : fork;
+            import core.sys.posix.unistd : fork, _exit;
             int child, status;
             if ((child = fork()) == 0)
             {
                 code();
-                exit(0);
+                _exit(0);
             }
             else
             {
@@ -2213,6 +2211,9 @@ is recommended if you want to process a complete file.
      * When passed as a compile-time argument, the string will be statically checked
      * against the argument types passed.
      * data = Items to be read.
+     * Returns:
+     *      Same as `formattedRead`: The number of variables filled. If the input range `r` ends early,
+     *      this number will be less than the number of variables provided.
      * Example:
 ----
 // test.d
@@ -3242,7 +3243,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
 
         /// Range primitive implementations.
         void put(A)(scope A writeme)
-            if ((isSomeChar!(Unqual!(ElementType!A)) ||
+            if ((isSomeChar!(ElementType!A) ||
                   is(ElementType!A : const(ubyte))) &&
                 isInputRange!A &&
                 !isInfinite!A)
@@ -3273,16 +3274,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
         /// ditto
         void put(C)(scope C c) @safe if (isSomeChar!C || is(C : const(ubyte)))
         {
-            import std.traits : Parameters;
             import std.utf : decodeFront, encode, stride;
-            static auto trustedFPUTC(int ch, _iobuf* h) @trusted
-            {
-                return _FPUTC(ch, h);
-            }
-            static auto trustedFPUTWC(Parameters!_FPUTWC[0] ch, _iobuf* h) @trusted
-            {
-                return _FPUTWC(ch, h);
-            }
 
             static if (c.sizeof == 1)
             {
@@ -4451,6 +4443,13 @@ void writeln(T...)(T args)
     useInit(stdout.lockingTextWriter());
 }
 
+@system unittest
+{
+    // https://issues.dlang.org/show_bug.cgi?id=21920
+    void function(string) printer = &writeln!string;
+    if (false) printer("Hello");
+}
+
 
 /***********************************
 Writes formatted data to standard output (without a trailing newline).
@@ -4573,6 +4572,9 @@ void writefln(Char, A...)(in Char[] fmt, A args)
  * When passed as a compile-time argument, the string will be statically checked
  * against the argument types passed.
  * args = Items to be read.
+ * Returns:
+ *      Same as `formattedRead`: The number of variables filled. If the input range `r` ends early,
+ *      this number will be less than the number of variables provided.
  * Example:
 ----
 // test.d
@@ -4732,15 +4734,15 @@ if (isSomeChar!C && is(Unqual!C == C) && !is(C == enum) &&
  * with appropriately-constructed C-style strings.
  */
 private FILE* _fopen(R1, R2)(R1 name, R2 mode = "r")
-if ((isInputRange!R1 && isSomeChar!(ElementEncodingType!R1) || isSomeString!R1) &&
-    (isInputRange!R2 && isSomeChar!(ElementEncodingType!R2) || isSomeString!R2))
+if ((isSomeFiniteCharInputRange!R1 || isSomeString!R1) &&
+    (isSomeFiniteCharInputRange!R2 || isSomeString!R2))
 {
     import std.internal.cstring : tempCString;
 
     auto namez = name.tempCString!FSChar();
     auto modez = mode.tempCString!FSChar();
 
-    static _fopenImpl(const(FSChar)* namez, const(FSChar)* modez) @trusted nothrow @nogc
+    static _fopenImpl(scope const(FSChar)* namez, scope const(FSChar)* modez) @trusted nothrow @nogc
     {
         version (Windows)
         {
@@ -4774,8 +4776,8 @@ version (Posix)
      * with appropriately-constructed C-style strings.
      */
     FILE* _popen(R1, R2)(R1 name, R2 mode = "r") @trusted nothrow @nogc
-    if ((isInputRange!R1 && isSomeChar!(ElementEncodingType!R1) || isSomeString!R1) &&
-        (isInputRange!R2 && isSomeChar!(ElementEncodingType!R2) || isSomeString!R2))
+    if ((isSomeFiniteCharInputRange!R1 || isSomeString!R1) &&
+        (isSomeFiniteCharInputRange!R2 || isSomeString!R2))
     {
         import std.internal.cstring : tempCString;
 

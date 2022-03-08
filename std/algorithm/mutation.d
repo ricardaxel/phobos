@@ -866,6 +866,9 @@ if (isInputRange!InputRange
 Initializes all elements of `range` with their `.init` value.
 Assumes that the elements of the range are uninitialized.
 
+This function is unavailable if `T` is a `struct` and  `T.this()` is annotated
+with `@disable`.
+
 Params:
         range = An
                 $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
@@ -874,10 +877,11 @@ Params:
 
 See_Also:
         $(LREF fill)
-        $(LREF uninitializeFill)
+        $(LREF uninitializedFill)
  */
 void initializeAll(Range)(Range range)
-if (isInputRange!Range && hasLvalueElements!Range && hasAssignableElements!Range)
+if (isInputRange!Range && hasLvalueElements!Range && hasAssignableElements!Range
+    && __traits(compiles, { static ElementType!Range _; }))
 {
     import core.stdc.string : memset, memcpy;
     import std.traits : hasElaborateAssign, isDynamicArray;
@@ -886,31 +890,13 @@ if (isInputRange!Range && hasLvalueElements!Range && hasAssignableElements!Range
     static if (hasElaborateAssign!T)
     {
         import std.algorithm.internal : addressOf;
-        //Elaborate opAssign. Must go the memcpy road.
-        //We avoid calling emplace here, because our goal is to initialize to
-        //the static state of T.init,
-        //So we want to avoid any un-necassarilly CC'ing of T.init
+        //Elaborate opAssign. Must go the memcpy/memset road.
         static if (!__traits(isZeroInit, T))
         {
-            auto p = typeid(T).initializer();
             for ( ; !range.empty ; range.popFront() )
             {
-                static if (__traits(isStaticArray, T))
-                {
-                    // static array initializer only contains initialization
-                    // for one element of the static array.
-                    auto elemp = cast(void *) addressOf(range.front);
-                    auto endp = elemp + T.sizeof;
-                    while (elemp < endp)
-                    {
-                        memcpy(elemp, p.ptr, p.length);
-                        elemp += p.length;
-                    }
-                }
-                else
-                {
-                    memcpy(addressOf(range.front), p.ptr, T.sizeof);
-                }
+                import core.internal.lifetime : emplaceInitializer;
+                emplaceInitializer(range.front);
             }
         }
         else
@@ -1055,6 +1041,18 @@ if (is(Range == char[]) || is(Range == wchar[]))
     assert(xs[1].x == 3);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=22105
+@system unittest
+{
+    struct NoDefaultCtor
+    {
+        @disable this();
+    }
+
+    NoDefaultCtor[1] array = void;
+    static assert(!__traits(compiles, array[].initializeAll));
+}
+
 // move
 /**
 Moves `source` into `target`, via a destructive copy when necessary.
@@ -1074,7 +1072,7 @@ Params:
 */
 void move(T)(ref T source, ref T target)
 {
-    moveImpl(source, target);
+    moveImpl(target, source);
 }
 
 /// For non-struct types, `move` just performs `target = source`:
@@ -1244,7 +1242,7 @@ pure nothrow @safe @nogc unittest
     static assert(is(typeof({ S s; move(s, s); }) == T));
 }
 
-private void moveImpl(T)(ref T source, ref T target)
+private void moveImpl(T)(ref scope T target, ref return scope T source)
 {
     import std.traits : hasElaborateDestructor;
 
@@ -1257,10 +1255,10 @@ private void moveImpl(T)(ref T source, ref T target)
         static if (hasElaborateDestructor!T) target.__xdtor();
     }
     // move and emplace source into target
-    moveEmplaceImpl(source, target);
+    moveEmplaceImpl(target, source);
 }
 
-private T moveImpl(T)(ref T source)
+private T moveImpl(T)(ref return scope T source)
 {
     // Properly infer safety from moveEmplaceImpl as the implementation below
     // might void-initialize pointers in result and hence needs to be @trusted
@@ -1269,10 +1267,10 @@ private T moveImpl(T)(ref T source)
     return trustedMoveImpl(source);
 }
 
-private T trustedMoveImpl(T)(ref T source) @trusted
+private T trustedMoveImpl(T)(ref return scope T source) @trusted
 {
     T result = void;
-    moveEmplaceImpl(source, result);
+    moveEmplaceImpl(result, source);
     return result;
 }
 
@@ -1415,7 +1413,7 @@ private T trustedMoveImpl(T)(ref T source) @trusted
     move(x, x);
 }
 
-private void moveEmplaceImpl(T)(ref T source, ref T target) pure
+private void moveEmplaceImpl(T)(ref scope T target, ref return scope T source)
 {
     import core.stdc.string : memcpy, memset;
     import std.traits : hasAliasing, hasElaborateAssign,
@@ -1427,7 +1425,7 @@ private void moveEmplaceImpl(T)(ref T source, ref T target) pure
     {
         import std.exception : doesPointTo;
         assert(!(doesPointTo(source, source) && !hasElaborateMove!T),
-            "Cannot move object with internal pointer unless `opPostMove` is defined.");
+            "Cannot move object of type " ~ T.stringof ~ " with internal pointer unless `opPostMove` is defined.");
     }
 
     static if (is(T == struct))
@@ -1456,10 +1454,7 @@ private void moveEmplaceImpl(T)(ref T source, ref T target) pure
             static if (__traits(isZeroInit, T))
                 () @trusted { memset(&source, 0, sz); }();
             else
-            {
-                auto init = typeid(T).initializer();
-                () @trusted { memcpy(&source, init.ptr, sz); }();
-            }
+                () @trusted { memcpy(&source, __traits(initSymbol, T).ptr, sz); }();
         }
     }
     else static if (isStaticArray!T)
@@ -1486,7 +1481,7 @@ private void moveEmplaceImpl(T)(ref T source, ref T target) pure
  */
 void moveEmplace(T)(ref T source, ref T target) pure @system
 {
-    moveEmplaceImpl(source, target);
+    moveEmplaceImpl(target, source);
 }
 
 ///
@@ -2388,7 +2383,7 @@ Range remove(alias pred, SwapStrategy s = SwapStrategy.stable, Range)(Range rang
 @nogc @safe unittest
 {
     // @nogc test
-    int[10] arr = [0,1,2,3,4,5,6,7,8,9];
+    static int[] arr = [0,1,2,3,4,5,6,7,8,9];
     alias pred = e => e < 5;
 
     auto r = arr[].remove!(SwapStrategy.unstable)(0);
