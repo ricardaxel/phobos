@@ -7085,6 +7085,8 @@ pure @safe nothrow @nogc unittest
     rc1._refCounted.initialize();
 }
 
+import ldc.attributes: optStrategy; // LDC
+@optStrategy("none") // LDC. Use-after-scope UB is used in this function, disable optimization.
 pure @system unittest
 {
     foreach (MyRefCounted; AliasSeq!(SafeRefCounted, RefCounted))
