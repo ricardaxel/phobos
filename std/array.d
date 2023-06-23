@@ -1045,7 +1045,8 @@ if (isDynamicArray!T && allSatisfy!(isIntegral, I))
 }
 
 // from rt/lifetime.d
-private extern(C) void[] _d_newarrayU(const TypeInfo ti, size_t length) pure nothrow;
+private extern(C) void[] _d_newarrayU(const TypeInfo ti, size_t length,
+                                      string file = __FILE__, uint line = __LINE__) pure nothrow;
 
 // from rt/tracegc.d
 version (D_ProfileGC)
@@ -3631,7 +3632,7 @@ if (isDynamicArray!A)
             if (overflow) assert(false, "the reallocation would exceed the "
                     ~ "available pointer range");
 
-            auto bi = (() @trusted => GC.qalloc(nbytes, blockAttribute!T))();
+            auto bi = (() @trusted => GC.qalloc(nbytes, blockAttribute!T, null, "std.array.ensureAddable: TODO", 0))();
             _data.capacity = bi.size / T.sizeof;
             import core.stdc.string : memcpy;
             if (len)

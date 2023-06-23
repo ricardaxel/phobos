@@ -378,7 +378,7 @@ version (Posix) private void[] readImpl(scope const(char)[] name, scope const(FS
     immutable initialAlloc = min(upTo, to!size_t(statbuf.st_size
         ? min(statbuf.st_size + 1, maxInitialAlloc)
         : minInitialAlloc));
-    void[] result = GC.malloc(initialAlloc, GC.BlkAttr.NO_SCAN)[0 .. initialAlloc];
+    void[] result = GC.malloc(initialAlloc, GC.BlkAttr.NO_SCAN, null, "std.file.readImple: TODO", 0)[0 .. initialAlloc];
     scope(failure) GC.free(result.ptr);
 
     auto size = checked(size_t(0));
