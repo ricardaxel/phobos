@@ -88,6 +88,8 @@ import std.traits;
 import std.range.primitives;
 public import std.range.primitives : save, empty, popFront, popBack, front, back;
 
+import core.internal.gc.gcdebug;
+
 /**
  * Allocates an array and initializes it with copies of the elements
  * of range `r`.
@@ -3632,7 +3634,9 @@ if (isDynamicArray!A)
             if (overflow) assert(false, "the reallocation would exceed the "
                     ~ "available pointer range");
 
-            auto bi = (() @trusted => GC.qalloc(nbytes, blockAttribute!T, null, "std.array.ensureAddable: TODO", 0))();
+            auto bi = (() @trusted => GC.qalloc(nbytes, blockAttribute!T, null, 
+                          DebugInfo.arrayAlloc("std.array.ensureAddable: TODO", 0, nbytes, null))
+                      )();
             _data.capacity = bi.size / T.sizeof;
             import core.stdc.string : memcpy;
             if (len)
