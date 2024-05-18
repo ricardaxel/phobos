@@ -1181,7 +1181,7 @@ private:
         {
             asm nothrow @nogc
             {
-                "movgr2fcsr $fcsr0, %0" :
+                "movgr2fcsr $fcsr0,%0" :
                 : "r" (newState & (roundingMask | allExceptions));
             }
         }
